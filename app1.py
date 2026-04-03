@@ -116,7 +116,7 @@ def load_data():
         st.secrets["gcp_service_account"], scopes=SCOPES
     )
     client = gspread.authorize(creds)
-    sheet  = client.open("po").worksheet("PR Tracker")
+    sheet  = client.open("po tracker").worksheet("PR Tracker")
     raw    = sheet.get_all_values()
 
     headers = raw[2]
