@@ -242,7 +242,6 @@ DARK = dict(
     font=dict(family="DM Sans", color="#666", size=11),
     xaxis=dict(gridcolor="rgba(255,255,255,0.05)", tickcolor="#333", linecolor="#333"),
     yaxis=dict(gridcolor="rgba(255,255,255,0.05)", tickcolor="#333", linecolor="#333"),
-    legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#888", size=11)),
     margin=dict(l=12,r=12,t=36,b=12),
 )
 
