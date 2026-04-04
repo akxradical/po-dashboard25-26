@@ -1,6 +1,6 @@
 """
-PO Tracker Dashboard — Central Procurement
-Zetwerk | Live data from Google Sheets | 2025 UI
+Central Procurement Dashboard — Zetwerk
+Inspired by Quantix UI | Live Google Sheets + Excel KPIs
 """
 
 import pandas as pd
@@ -9,758 +9,759 @@ import plotly.graph_objects as go
 import streamlit as st
 from google.oauth2.service_account import Credentials
 import gspread
-import time
 
 st.set_page_config(
-    page_title="PO Tracker | Zetwerk",
-    page_icon="📦",
+    page_title="CPT Dashboard | Zetwerk",
+    page_icon="⚡",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
+# ── Embedded KPI data from Excel ─────────────────────────────────────────────
+OTIF_DATA = {
+    "BU":          ["O&G",  "Water", "Railways", "CAT-2"],
+    "FY26":        [68.00,  71.00,   72.83,       70.61],
+    "FY25":        [74.00,  81.90,   68.60,       77.40],
+    "Target":      [75,     75,      75,           75],
+}
+
+TAT_DATA = {
+    "BU":          ["O&G",  "Water", "Railways", "CAT-2"],
+    "FY26 PO":     [133,    68,      124,         325],
+    "FY25 PO":     [138,    141,     14,          293],
+    "FY26 TAT":    [92.0,   68.0,    75.0,        80.5],
+    "FY25 TAT":    [98.79,  72.93,   92.21,       86.03],
+    "Target TAT":  [90,     90,      90,           90],
+}
+
+CAT_DATA = {
+    "Category":    ["Pipes","EM","Fittings","Consumables","Cables","Valves","CAPEX","Pumps","Electrical Panel","Sleepers"],
+    "Spend FY26":  [195.70, 102.42, 12.30, 5.01, 2.73, 8.90, 1.86, 2.70, 0.90, 1.40],
+    "Savings FY26":[15.80,  4.37,   0.60,  1.87, 0.05, -0.20,0.00, 0.40, 0.05, 0.10],
+    "Spend FY25":  [180.00, 67.00,  31.10, 5.00, 13.80,13.20, 2.20,20.00, 5.30,10.20],
+    "Savings FY25":[3.80,   5.00,   1.20,  0.90, 0.00, 1.48,  1.00, 1.70, 0.30, 0.30],
+}
+
+SPEND_DATA = {
+    "BU":           ["O&G",  "Water",  "Railways", "ZAP91", "Total"],
+    "Spend FY26":   [47.29,  201.02,   24.74,      12.67,   285.72],
+    "Savings FY26": [4.91,   16.72,    -1.99,      -0.20,   19.44],
+    "Savings% FY26":[9.41,   8.32,     -8.05,      -1.58,   6.80],
+    "Spend FY25":   [116.51, 245.52,   36.56,      0,       398.59],
+    "Savings FY25": [13.15,  9.76,     2.11,       0,       25.02],
+    "Target%":      [4.5,    4.5,      4.5,        None,    None],
+}
+
+AOP_DATA = {
+    "BU":       ["O&G",  "Water", "Railways", "Total"],
+    "AOP":      [55.6,   67.9,    1.61,       125.11],
+    "Achieved": [29.0,   43.32,   0.73,       73.05],
+    "Variance": [-26.6,  -24.58,  -0.88,      -52.06],
+    "Var%":     [-47.8,  -36.2,   -54.7,      -41.6],
+}
+
+CREDIT_MONTHS = ["Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec","Jan","Feb"]
+CREDIT_FY26   = [5.33, 5.94, 3.64, 4.99, 5.20, 5.35, 5.21, 5.00, 2.11, 1.97, 4.65]
+CREDIT_FY25   = [5.97, 5.25, 3.00, 5.09, 4.82, 2.12, 3.60, 4.30, 4.68, 3.97, 5.57]
+CREDIT_TARGET = [4.5]*11
+
+SPEND_MONTHLY = [47.26,166.22,11.73,5.35,7.69,6.88,24.42,38.56,26.98,42.20,13.70]
+
+# ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
 
-html, body, [class*="css"] {
-    font-family: 'Inter', sans-serif;
-}
+*, html, body { font-family: 'DM Sans', sans-serif; }
 
-/* ── Splash animation ── */
-@keyframes fadeInDown {
-    from { opacity: 0; transform: translateY(-20px); }
-    to   { opacity: 1; transform: translateY(0); }
-}
-@keyframes fadeInUp {
-    from { opacity: 0; transform: translateY(20px); }
-    to   { opacity: 1; transform: translateY(0); }
-}
-@keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50%       { opacity: 0.5; }
-}
-@keyframes shimmer {
-    0%   { background-position: -200% center; }
-    100% { background-position: 200% center; }
-}
-@keyframes countUp {
-    from { opacity: 0; transform: scale(0.8); }
-    to   { opacity: 1; transform: scale(1); }
-}
-
-/* ── Sidebar ── */
-[data-testid="stSidebar"] {
-    background: #0a0f1e !important;
-    border-right: 1px solid rgba(255,255,255,0.06) !important;
-}
-[data-testid="stSidebar"] * { color: #c8d8e8 !important; }
-[data-testid="stSidebar"] .stSelectbox label {
-    color: #5b7fa6 !important;
-    font-size: 10px !important;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-weight: 600;
-}
-[data-testid="stSidebar"] hr { border-color: rgba(255,255,255,0.08) !important; }
-[data-testid="stSidebar"] .stButton button {
-    background: linear-gradient(135deg, #1a56db, #0e3eb5) !important;
-    color: white !important;
-    border: none !important;
-    border-radius: 8px !important;
-    font-weight: 600 !important;
-    width: 100%;
-}
-
-/* ── Main background ── */
-[data-testid="stMain"] { background: #f0f2f8 !important; }
 [data-testid="stAppViewBlockContainer"] {
-    padding-top: 0 !important;
-    padding-left: 0 !important;
-    padding-right: 0 !important;
-    max-width: 100% !important;
-    background: #f0f2f8 !important;
+    padding: 0 !important; max-width: 100% !important;
+    background: #0e0e12 !important;
+}
+[data-testid="stMain"] { background: #0e0e12 !important; }
+[data-testid="stSidebar"] { display: none !important; }
+
+/* Header */
+.top-nav {
+    background: #13131a;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+    padding: 0 2rem;
+    display: flex; align-items: center; justify-content: space-between;
+    height: 56px;
+}
+.nav-logo { display:flex; align-items:center; gap:10px; }
+.nav-logo-mark {
+    width:32px; height:32px;
+    background: linear-gradient(135deg,#e53e3e,#fc4f4f);
+    border-radius:8px; display:flex; align-items:center; justify-content:center;
+    font-size:16px; font-weight:900; color:white;
+}
+.nav-brand { font-size:15px; font-weight:700; color:white; letter-spacing:-0.02em; }
+.nav-sub { font-size:11px; color:#666; font-weight:400; }
+.nav-tabs { display:flex; gap:2px; }
+.nav-tab {
+    padding:6px 14px; border-radius:6px; font-size:13px;
+    font-weight:500; color:#888; cursor:pointer; transition:all 0.15s;
+}
+.nav-tab.active { background:#e53e3e; color:white; }
+.nav-tab:hover:not(.active) { background:rgba(255,255,255,0.06); color:#ccc; }
+.nav-right { display:flex; align-items:center; gap:12px; }
+.nav-badge {
+    background:rgba(229,62,62,0.15); border:1px solid rgba(229,62,62,0.3);
+    color:#fc4f4f; padding:4px 10px; border-radius:999px;
+    font-size:11px; font-weight:600; letter-spacing:0.05em;
+}
+.nav-refresh {
+    background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1);
+    color:#ccc; padding:6px 14px; border-radius:8px;
+    font-size:12px; font-weight:500; cursor:pointer;
 }
 
-/* ── KPI Cards ── */
-.kpi-grid { display: grid; grid-template-columns: repeat(6,1fr); gap: 12px; padding: 0 1.5rem; margin-bottom: 12px; }
-.kpi-grid-4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; padding: 0 1.5rem; margin-bottom: 20px; }
-
-.kpi-card {
-    background: #ffffff;
-    border-radius: 16px;
-    padding: 16px 18px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
-    border: 1px solid rgba(255,255,255,0.8);
-    position: relative;
-    overflow: hidden;
-    animation: countUp 0.5s ease forwards;
-    transition: transform 0.2s, box-shadow 0.2s;
+/* Page title */
+.page-header {
+    padding: 20px 2rem 0;
+    display: flex; align-items:flex-end; justify-content:space-between;
 }
-.kpi-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-}
-.kpi-card::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 3px;
-    border-radius: 16px 16px 0 0;
-}
-.kpi-card.blue::before   { background: linear-gradient(90deg, #1a56db, #3b82f6); }
-.kpi-card.green::before  { background: linear-gradient(90deg, #059669, #34d399); }
-.kpi-card.orange::before { background: linear-gradient(90deg, #ea580c, #fb923c); }
-.kpi-card.purple::before { background: linear-gradient(90deg, #7c3aed, #a78bfa); }
-.kpi-card.teal::before   { background: linear-gradient(90deg, #0d9488, #2dd4bf); }
-.kpi-card.pink::before   { background: linear-gradient(90deg, #db2777, #f472b6); }
-.kpi-card.amber::before  { background: linear-gradient(90deg, #d97706, #fbbf24); }
-.kpi-card.red::before    { background: linear-gradient(90deg, #dc2626, #f87171); }
-
-.kpi-icon-wrap {
-    width: 36px; height: 36px;
-    border-radius: 10px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 18px;
-    margin-bottom: 10px;
-}
-.kpi-card.blue   .kpi-icon-wrap { background: #eff6ff; }
-.kpi-card.green  .kpi-icon-wrap { background: #f0fdf4; }
-.kpi-card.orange .kpi-icon-wrap { background: #fff7ed; }
-.kpi-card.purple .kpi-icon-wrap { background: #faf5ff; }
-.kpi-card.teal   .kpi-icon-wrap { background: #f0fdfa; }
-.kpi-card.pink   .kpi-icon-wrap { background: #fdf2f8; }
-.kpi-card.amber  .kpi-icon-wrap { background: #fffbeb; }
-.kpi-card.red    .kpi-icon-wrap { background: #fef2f2; }
-
-.kpi-label { font-size: 10px; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 2px; }
-.kpi-value { font-size: 22px; font-weight: 800; color: #0f172a; line-height: 1.1; letter-spacing: -0.02em; }
-.kpi-sub   { font-size: 11px; color: #94a3b8; margin-top: 4px; }
-.kpi-trend { font-size: 11px; font-weight: 600; margin-top: 4px; }
-.kpi-trend.up   { color: #059669; }
-.kpi-trend.down { color: #dc2626; }
-.kpi-trend.neutral { color: #64748b; }
-
-/* ── Section titles ── */
-.section-title {
-    font-size: 13px; font-weight: 700; color: #334155;
-    margin: 0 1.5rem 10px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid #e2e8f0;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    display: flex; align-items: center; gap: 8px;
+.page-title { font-size:26px; font-weight:700; color:#fff; letter-spacing:-0.03em; }
+.page-sub { font-size:13px; color:#555; margin-top:2px; }
+.fy-badge {
+    background:rgba(229,62,62,0.12); border:1px solid rgba(229,62,62,0.25);
+    color:#fc4f4f; padding:5px 14px; border-radius:8px;
+    font-size:12px; font-weight:600;
 }
 
-/* ── Tabs ── */
-div[data-testid="stTabs"] {
-    background: white;
-    border-radius: 0;
-    border-bottom: 1px solid #e2e8f0;
-    padding: 0 1.5rem;
-    margin-bottom: 0;
+/* KPI Cards */
+.kpi-row { display:grid; gap:12px; padding:16px 2rem 0; }
+.kpi-row-3 { grid-template-columns: repeat(3,1fr); }
+.kpi-row-4 { grid-template-columns: repeat(4,1fr); }
+.kpi-row-5 { grid-template-columns: repeat(5,1fr); }
+
+.kcard {
+    background: #13131a;
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 14px;
+    padding: 18px 20px;
+    position: relative; overflow: hidden;
+    transition: border-color 0.2s, transform 0.2s;
 }
+.kcard:hover { border-color:rgba(255,255,255,0.15); transform:translateY(-1px); }
+.kcard::before {
+    content:''; position:absolute; top:0; left:0; right:0; height:2px;
+    border-radius:14px 14px 0 0;
+}
+.kcard.red::before  { background:linear-gradient(90deg,#e53e3e,#fc8181); }
+.kcard.green::before{ background:linear-gradient(90deg,#38a169,#68d391); }
+.kcard.blue::before { background:linear-gradient(90deg,#3182ce,#63b3ed); }
+.kcard.amber::before{ background:linear-gradient(90deg,#d69e2e,#f6e05e); }
+.kcard.purple::before{background:linear-gradient(90deg,#805ad5,#b794f4); }
+.kcard.teal::before { background:linear-gradient(90deg,#2c7a7b,#4fd1c5); }
+.kcard.gray::before { background:linear-gradient(90deg,#4a5568,#a0aec0); }
+
+.kcard-icon {
+    width:34px; height:34px; border-radius:9px;
+    display:flex; align-items:center; justify-content:center;
+    font-size:16px; margin-bottom:12px;
+}
+.kcard.red .kcard-icon   { background:rgba(229,62,62,0.15); }
+.kcard.green .kcard-icon { background:rgba(56,161,105,0.15); }
+.kcard.blue .kcard-icon  { background:rgba(49,130,206,0.15); }
+.kcard.amber .kcard-icon { background:rgba(214,158,46,0.15); }
+.kcard.purple .kcard-icon{ background:rgba(128,90,213,0.15); }
+.kcard.teal .kcard-icon  { background:rgba(44,122,123,0.15); }
+.kcard.gray .kcard-icon  { background:rgba(74,85,104,0.15); }
+
+.kcard-label { font-size:11px; color:#555; font-weight:600; text-transform:uppercase; letter-spacing:0.07em; }
+.kcard-value { font-size:28px; font-weight:700; color:#fff; line-height:1.1; margin:4px 0 2px; letter-spacing:-0.03em; font-family:'DM Mono',monospace; }
+.kcard-sub   { font-size:11px; color:#555; }
+.kcard-delta { font-size:11px; font-weight:600; margin-top:6px; }
+.kcard-delta.up   { color:#68d391; }
+.kcard-delta.down { color:#fc8181; }
+.kcard-delta.warn { color:#f6e05e; }
+
+/* Section headers */
+.sec-header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:20px 2rem 10px; margin-top:4px;
+}
+.sec-title { font-size:14px; font-weight:700; color:#ccc; letter-spacing:-0.01em; }
+.sec-badge {
+    font-size:11px; color:#555; background:rgba(255,255,255,0.04);
+    border:1px solid rgba(255,255,255,0.07); padding:3px 10px; border-radius:6px;
+}
+
+/* Chart wrappers */
+.chart-wrap { padding:0 2rem; }
+.chart-card {
+    background:#13131a; border:1px solid rgba(255,255,255,0.07);
+    border-radius:14px; overflow:hidden;
+}
+.chart-card-header {
+    padding:14px 16px 0;
+    display:flex; align-items:center; justify-content:space-between;
+}
+.chart-card-title { font-size:13px; font-weight:600; color:#aaa; }
+
+/* Table */
+.data-table { width:100%; border-collapse:collapse; font-size:13px; }
+.data-table th {
+    text-align:left; padding:10px 14px; font-size:10px; font-weight:600;
+    color:#555; text-transform:uppercase; letter-spacing:0.07em;
+    border-bottom:1px solid rgba(255,255,255,0.07);
+}
+.data-table td {
+    padding:10px 14px; color:#ccc; border-bottom:1px solid rgba(255,255,255,0.04);
+}
+.data-table tr:hover td { background:rgba(255,255,255,0.03); }
+.data-table .num { font-family:'DM Mono',monospace; font-size:12px; }
+.pill-green { background:rgba(56,161,105,0.15); color:#68d391; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; }
+.pill-red   { background:rgba(229,62,62,0.15);  color:#fc8181; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; }
+.pill-amber { background:rgba(214,158,46,0.15); color:#f6e05e; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; }
+
+/* Footer */
+.footer { padding:16px 2rem; border-top:1px solid rgba(255,255,255,0.05); margin-top:24px; display:flex; align-items:center; justify-content:space-between; }
+.footer-left { font-size:12px; color:#333; }
+.footer-right { font-size:11px; color:#2a2a35; font-family:'DM Mono',monospace; }
+
+/* Plotly override */
+.stPlotlyChart { border-radius:0 0 14px 14px; overflow:hidden; }
 div[data-testid="stTabs"] button[role="tab"] {
-    font-size: 13px !important;
-    font-weight: 600 !important;
-    padding: 14px 20px !important;
-    color: #64748b !important;
-    border-radius: 0 !important;
-    letter-spacing: 0.01em;
+    font-size:13px !important; font-weight:500 !important;
+    color:#555 !important; padding:10px 18px !important;
 }
 div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
-    color: #1a56db !important;
-    border-bottom: 2px solid #1a56db !important;
-    background: transparent !important;
+    color:#fc4f4f !important; border-bottom:2px solid #e53e3e !important;
 }
-div[data-testid="stTabs"] button[role="tab"]:hover {
-    color: #1a56db !important;
-    background: #f8faff !important;
-}
-
-/* ── Chart containers ── */
-.chart-container {
-    background: white;
-    border-radius: 16px;
-    padding: 4px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-    border: 1px solid #f1f5f9;
-    margin-bottom: 16px;
-}
-
-/* ── Score badge ── */
-.score-badge {
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 32px; height: 32px;
-    border-radius: 8px;
-    font-size: 13px; font-weight: 700;
-}
-
-/* ── Status pill ── */
-.pill {
-    display: inline-block;
-    padding: 3px 10px;
-    border-radius: 999px;
-    font-size: 11px;
-    font-weight: 600;
-}
-
-/* ── Live indicator ── */
-.live-dot {
-    display: inline-block;
-    width: 8px; height: 8px;
-    background: #22c55e;
-    border-radius: 50%;
-    animation: pulse 2s infinite;
-    margin-right: 6px;
-}
-
-.chart-wrap { padding: 0 1.5rem; }
+[data-testid="stMainBlockContainer"] { padding:0 !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Google Sheets ─────────────────────────────────────────────────────────────
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
-]
-YET_COL   = "PO YET TO BE DELIVERED\n(incl. GST)"
-DELIV_COL = "PO DELIVERED VALUE \n(incl. GST)"
+# ── PLOTLY THEME ──────────────────────────────────────────────────────────────
+DARK = dict(
+    plot_bgcolor="rgba(0,0,0,0)",
+    paper_bgcolor="rgba(0,0,0,0)",
+    font=dict(family="DM Sans", color="#666", size=11),
+    xaxis=dict(gridcolor="rgba(255,255,255,0.05)", tickcolor="#333", linecolor="#333"),
+    yaxis=dict(gridcolor="rgba(255,255,255,0.05)", tickcolor="#333", linecolor="#333"),
+    legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#888", size=11)),
+    margin=dict(l=12,r=12,t=36,b=12),
+)
 
-PAYMENT_SCORES = {
-    "Advance": -2, "Advance on Dispatch": 0,
-    "IBC 90": 1, "IBC 60": 2, "IBC 45": 3, "IBC 30": 5,
-    "VFS": 3, "IFC 30": 5, "IFC 45": 4, "IFC 60": 3, "IFC 90": 6,
-    "Clean Credit 15": 3, "Clean Credit 30": 5,
-    "Clean Credit 45": 7, "Clean Credit 60": 8, "Clean Credit 90": 10,
-    "On Delivery": 2, "On Dispatch": 0,
-}
+RED   = "#e53e3e"
+GREEN = "#38a169"
+BLUE  = "#3182ce"
+AMBER = "#d69e2e"
 
-def parse_payment_score(term):
-    if not term or str(term).strip() == "": return None
-    total_score, total_pct = 0, 0
-    parts = str(term).split("+")
-    for part in parts:
-        part = part.strip()
-        pct = 100
-        for p in part.split():
-            if "%" in p:
-                try: pct = float(p.replace("%",""))
-                except: pass
-        score = 0
-        for key, val in PAYMENT_SCORES.items():
-            if key.lower() in part.lower():
-                score = val; break
-        total_score += (pct/100) * score
-        total_pct += pct
-    return round(total_score, 2) if total_pct > 0 else None
+# ── NAV ───────────────────────────────────────────────────────────────────────
+st.markdown(f"""
+<div class="top-nav">
+  <div class="nav-logo">
+    <div class="nav-logo-mark">Z</div>
+    <div>
+      <div class="nav-brand">Zetwerk CPT</div>
+      <div class="nav-sub">Central Procurement</div>
+    </div>
+  </div>
+  <div class="nav-tabs">
+    <div class="nav-tab active">Dashboard</div>
+    <div class="nav-tab">PO Tracker</div>
+    <div class="nav-tab">Suppliers</div>
+    <div class="nav-tab">Analytics</div>
+  </div>
+  <div class="nav-right">
+    <div class="nav-badge">FY 2025-26</div>
+    <div class="nav-refresh">↻ Refresh</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
-@st.cache_data(ttl=300, show_spinner=False)
-def load_data():
-    creds  = Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"], scopes=SCOPES
-    )
-    client = gspread.authorize(creds)
-    sheet  = client.open("po tracker").worksheet("PR Tracker")
-    raw    = sheet.get_all_values()
-    headers = raw[2]
-    data    = raw[3:]
-    df = pd.DataFrame(data, columns=headers)
-    df = df[df["SN"].str.strip().str.match(r"^\d+")].copy()
-    df.reset_index(drop=True, inplace=True)
+# ── PAGE HEADER ───────────────────────────────────────────────────────────────
+st.markdown(f"""
+<div class="page-header">
+  <div>
+    <div class="page-title">Procurement Dashboard</div>
+    <div class="page-sub">CAT-2: EM / Pipes / Fittings / Consumables · Apr 2025 – Feb 2026</div>
+  </div>
+  <div class="fy-badge">FY26 · Apr–Feb · 11 months</div>
+</div>
+""", unsafe_allow_html=True)
 
-    NUM = ["PR Qty","PO Basic Value","GST","PO Value with GST","PCA Basic Value",
-           "PCA Value with GST","Savings Value","Savings %","PR - PO TAT",
-           "Actual Delivery TAT (Days)","Realized Saving","Realized PO Value (Basic)",
-           YET_COL, DELIV_COL]
-    for c in NUM:
-        if c in df.columns: df[c] = pd.to_numeric(df[c], errors="coerce")
+# ── TABS ──────────────────────────────────────────────────────────────────────
+tab1, tab2, tab3, tab4 = st.tabs([
+    "  Overview  ", "  Spend & Savings  ", "  TAT & OTD  ", "  Credit Metric  "
+])
 
-    DATES = ["PR Dt.","PO Dt.","Delivery Date at Project Site",
-             "NFA Dt.","NFA App. Dt","MFC Dt.","Rev. PR Dt/ PR App. From Finance"]
-    for c in DATES:
-        if c in df.columns: df[c] = pd.to_datetime(df[c], errors="coerce")
+# ════════════════════════════════════════════════════════════════════
+# TAB 1 — OVERVIEW
+# ════════════════════════════════════════════════════════════════════
+with tab1:
 
-    for c in ["OTD","OTIF"]:
-        if c in df.columns: df[c] = pd.to_numeric(df[c], errors="coerce")
-
-    if "PO Payment Terms" in df.columns:
-        df["payment_score"] = df["PO Payment Terms"].apply(parse_payment_score)
-
-    return df
-
-# ── Splash Screen ─────────────────────────────────────────────────────────────
-splash = st.empty()
-with splash.container():
+    # KPI Row 1 — Top numbers
     st.markdown("""
-    <div style="min-height:100vh; display:flex; align-items:center; justify-content:center;
-                background:linear-gradient(135deg,#0a0f1e 0%,#0d1f3c 50%,#0a1628 100%);">
-      <div style="text-align:center; animation:fadeInDown 0.8s ease;">
-        <div style="font-size:64px; margin-bottom:16px; animation:fadeInDown 0.6s ease;">📦</div>
-        <div style="font-size:13px; color:#3b82f6; letter-spacing:0.2em; font-weight:600;
-                    text-transform:uppercase; margin-bottom:8px; animation:fadeInDown 0.7s ease;">
-          ZETWERK · CENTRAL PROCUREMENT
-        </div>
-        <h1 style="font-size:2.8rem; font-weight:900; color:white; margin:0 0 8px;
-                   letter-spacing:-0.03em; animation:fadeInDown 0.8s ease;">
-          PO Tracker
-        </h1>
-        <p style="color:rgba(255,255,255,0.45); font-size:14px; margin:0 0 40px;
-                  animation:fadeInUp 0.9s ease;">
-          CAT-2 · EM / Pipes / Fittings / Consumables
-        </p>
-        <div style="display:flex; align-items:center; justify-content:center; gap:10px;
-                    animation:fadeInUp 1s ease;">
-          <div style="width:200px; height:4px; background:rgba(255,255,255,0.1);
-                      border-radius:4px; overflow:hidden;">
-            <div style="height:100%; background:linear-gradient(90deg,#1a56db,#3b82f6,#1a56db);
-                        background-size:200% auto; animation:shimmer 1.5s linear infinite;
-                        border-radius:4px; width:100%;"></div>
-          </div>
-        </div>
-        <p style="color:rgba(255,255,255,0.3); font-size:12px; margin-top:16px;
-                  animation:pulse 2s infinite;">
-          Connecting to Google Sheets…
-        </p>
+    <div class="kpi-row kpi-row-5">
+      <div class="kcard blue">
+        <div class="kcard-icon">📦</div>
+        <div class="kcard-label">Total POs (FY26)</div>
+        <div class="kcard-value">325</div>
+        <div class="kcard-sub">vs 293 in FY25</div>
+        <div class="kcard-delta up">▲ +10.9% YoY</div>
+      </div>
+      <div class="kcard green">
+        <div class="kcard-icon">💰</div>
+        <div class="kcard-label">Total Spend (INR Cr)</div>
+        <div class="kcard-value">285.7</div>
+        <div class="kcard-sub">vs 398.6 Cr FY25</div>
+        <div class="kcard-delta down">▼ -28.3% YoY</div>
+      </div>
+      <div class="kcard green">
+        <div class="kcard-icon">📈</div>
+        <div class="kcard-label">Total Savings (INR Cr)</div>
+        <div class="kcard-value">19.44</div>
+        <div class="kcard-sub">6.80% savings rate</div>
+        <div class="kcard-delta down">▼ vs 25.02 Cr FY25</div>
+      </div>
+      <div class="kcard amber">
+        <div class="kcard-icon">⏱️</div>
+        <div class="kcard-label">Avg PR→PO TAT</div>
+        <div class="kcard-value">80.5d</div>
+        <div class="kcard-sub">Target: 90 days</div>
+        <div class="kcard-delta up">✓ Within target</div>
+      </div>
+      <div class="kcard red">
+        <div class="kcard-icon">🎯</div>
+        <div class="kcard-label">CAT-2 OTIF</div>
+        <div class="kcard-value">70.6%</div>
+        <div class="kcard-sub">Target: 75%</div>
+        <div class="kcard-delta down">▼ Below target</div>
       </div>
     </div>
     """, unsafe_allow_html=True)
 
-df_raw = load_data()
-time.sleep(0.5)
-splash.empty()
-
-# ── Header ────────────────────────────────────────────────────────────────────
-st.markdown(f"""
-<div style="background:linear-gradient(135deg,#0a0f1e 0%,#0d1f3c 60%,#0f2d5e 100%);
-            padding:20px 2rem 16px; margin:0; width:100%; box-sizing:border-box;
-            border-bottom:1px solid rgba(255,255,255,0.06);">
-  <div style="display:flex; align-items:center; justify-content:space-between;">
-    <div style="display:flex; align-items:center; gap:14px;">
-      <div style="width:42px; height:42px; background:linear-gradient(135deg,#1a56db,#3b82f6);
-                  border-radius:12px; display:flex; align-items:center; justify-content:center;
-                  font-size:20px; box-shadow:0 4px 12px rgba(26,86,219,0.4);">📦</div>
-      <div>
-        <div style="font-size:10px; color:#3b82f6; letter-spacing:0.15em; font-weight:700;
-                    text-transform:uppercase;">Zetwerk · Central Procurement</div>
-        <h1 style="margin:2px 0 0; color:#fff; font-size:1.4rem; font-weight:800;
-                   letter-spacing:-0.02em;">PO Tracker Dashboard</h1>
+    # KPI Row 2 — AOP
+    st.markdown("""
+    <div class="sec-header" style="margin-top:12px;">
+      <div class="sec-title">AOP vs Achieved (FY26 H1)</div>
+      <div class="sec-badge">INR Crore</div>
+    </div>
+    <div class="kpi-row kpi-row-4">
+      <div class="kcard red">
+        <div class="kcard-icon">🏭</div>
+        <div class="kcard-label">O&G — AOP vs Achieved</div>
+        <div class="kcard-value">29 / 55.6</div>
+        <div class="kcard-sub">AOP: ₹55.6 Cr</div>
+        <div class="kcard-delta down">▼ -26.6 Cr (-47.8%)</div>
+      </div>
+      <div class="kcard amber">
+        <div class="kcard-icon">💧</div>
+        <div class="kcard-label">Water — AOP vs Achieved</div>
+        <div class="kcard-value">43.3 / 67.9</div>
+        <div class="kcard-sub">AOP: ₹67.9 Cr</div>
+        <div class="kcard-delta down">▼ -24.6 Cr (-36.2%)</div>
+      </div>
+      <div class="kcard red">
+        <div class="kcard-icon">🚂</div>
+        <div class="kcard-label">Railways — AOP vs Achieved</div>
+        <div class="kcard-value">0.73 / 1.61</div>
+        <div class="kcard-sub">AOP: ₹1.61 Cr</div>
+        <div class="kcard-delta down">▼ -0.88 Cr (-54.7%)</div>
+      </div>
+      <div class="kcard red">
+        <div class="kcard-icon">📊</div>
+        <div class="kcard-label">Total — AOP vs Achieved</div>
+        <div class="kcard-value">73 / 125</div>
+        <div class="kcard-sub">AOP: ₹125.1 Cr</div>
+        <div class="kcard-delta down">▼ -52.1 Cr (-41.6%)</div>
       </div>
     </div>
-    <div style="display:flex; align-items:center; gap:16px;">
-      <div style="text-align:right;">
-        <div style="font-size:10px; color:rgba(255,255,255,0.4); letter-spacing:0.05em;">LAST UPDATED</div>
-        <div style="font-size:12px; color:rgba(255,255,255,0.7); font-weight:500;">
-          {pd.Timestamp.now().strftime('%d %b %Y, %H:%M')}
-        </div>
-      </div>
-      <div style="display:flex; align-items:center; background:rgba(34,197,94,0.12);
-                  border:1px solid rgba(34,197,94,0.25); border-radius:999px;
-                  padding:5px 12px; gap:6px;">
-        <div class="live-dot"></div>
-        <span style="font-size:11px; color:#22c55e; font-weight:600;">LIVE</span>
-      </div>
-    </div>
-  </div>
-</div>
-<div style="height:1px; background:linear-gradient(90deg,transparent,rgba(59,130,246,0.3),transparent);"></div>
-""", unsafe_allow_html=True)
-
-# ── Sidebar ───────────────────────────────────────────────────────────────────
-st.sidebar.markdown("""
-<div style="padding:16px 0 8px;">
-  <div style="font-size:10px; color:#3b82f6; letter-spacing:0.15em; font-weight:700;
-              text-transform:uppercase; margin-bottom:4px;">Dashboard</div>
-  <div style="font-size:16px; color:white; font-weight:700;">Filters</div>
-</div>
-""", unsafe_allow_html=True)
-
-def opts(col):
-    return ["All"] + sorted(df_raw[col].dropna().astype(str).unique().tolist())
-
-sel_bu     = st.sidebar.selectbox("Business Unit",    opts("BU"))
-sel_buyer  = st.sidebar.selectbox("Handled By",       opts("Handled by"))
-sel_cat    = st.sidebar.selectbox("Category",         opts("Category"))
-sel_status = st.sidebar.selectbox("Current Status",   opts("Current Status"))
-sel_deliv  = st.sidebar.selectbox("Delivery Status",  opts("Delivery Status"))
-
-st.sidebar.divider()
-
-if st.sidebar.button("🔄  Refresh Data"):
-    st.cache_data.clear()
-    st.rerun()
-
-st.sidebar.markdown(f"""
-<div style="padding:12px 0; text-align:center;">
-  <div style="font-size:10px; color:#3b6b9a; margin-bottom:4px;">AUTO-REFRESH EVERY 5 MIN</div>
-  <div style="font-size:11px; color:#4a7fa5;">
-    {pd.Timestamp.now().strftime('%d %b %Y · %H:%M')}
-  </div>
-</div>
-""", unsafe_allow_html=True)
-
-# ── Filters ───────────────────────────────────────────────────────────────────
-df = df_raw.copy()
-if sel_bu     != "All": df = df[df["BU"].astype(str)             == sel_bu]
-if sel_buyer  != "All": df = df[df["Handled by"].astype(str)     == sel_buyer]
-if sel_cat    != "All": df = df[df["Category"].astype(str)       == sel_cat]
-if sel_status != "All": df = df[df["Current Status"].astype(str) == sel_status]
-if sel_deliv  != "All": df = df[df["Delivery Status"].astype(str)== sel_deliv]
-
-# ── KPIs ──────────────────────────────────────────────────────────────────────
-total_rows     = len(df)
-po_released    = (df["Current Status"] == "PO RELEASED").sum()
-delivered      = (df["Current Status"] == "MATERIAL DELIVERED AT SITE").sum()
-partial_deliv  = (df["Current Status"] == "PARTIAL MATERIAL DELIVERED AT SITE").sum()
-ongoing        = (df["Delivery Status"] == "Ongoing").sum()
-completed      = (df["Delivery Status"] == "Completed").sum()
-on_hold        = (df["Current Status"].str.contains("HOLD|Hold", na=False)).sum()
-total_po_val   = df["PO Basic Value"].fillna(0).sum()
-total_po_gst   = df["PO Value with GST"].fillna(0).sum()
-total_savings  = df["Savings Value"].fillna(0).sum()
-total_yet      = df[YET_COL].fillna(0).sum()   if YET_COL   in df.columns else 0
-total_deliv_v  = df[DELIV_COL].fillna(0).sum() if DELIV_COL in df.columns else 0
-savings_pct    = (total_savings / total_po_val * 100) if total_po_val else 0
-avg_pr_po_tat  = df["PR - PO TAT"].mean()
-avg_deliv_tat  = df["Actual Delivery TAT (Days)"].mean()
-otd_ok         = (df["OTD"].dropna() <= 1).sum()
-otd_total      = df["OTD"].dropna().count()
-otd_rate       = (otd_ok / otd_total * 100) if otd_total else 0
-deliv_pct      = (total_deliv_v / total_po_gst * 100) if total_po_gst else 0
-
-has_payment    = "payment_score" in df.columns and df["payment_score"].notna().any()
-avg_pt_score   = df["payment_score"].mean() if has_payment else None
-
-COMMON = dict(
-    plot_bgcolor="rgba(0,0,0,0)",
-    paper_bgcolor="rgba(0,0,0,0)",
-    font=dict(family="Inter", size=12, color="#475569"),
-)
-
-# ── Tabs ──────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4 = st.tabs([
-    "  Overview  ", "  Performance  ", "  Delivery  ", "  Data Table  "
-])
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 1 — OVERVIEW
-# ══════════════════════════════════════════════════════════════════════════════
-with tab1:
-    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
-
-    # KPI Row 1
-    st.markdown('<div class="kpi-grid">', unsafe_allow_html=True)
-    c1,c2,c3,c4,c5,c6 = st.columns(6)
-
-    cards_r1 = [
-        (c1,"blue","📋","Total PRs / POs", f"{total_rows:,}", f"Active records","neutral"),
-        (c2,"green","✅","PO Released", f"{po_released:,}", f"{po_released/max(total_rows,1)*100:.0f}% of total","up"),
-        (c3,"teal","🏭","At Site", f"{delivered:,}", f"+{partial_deliv} partial","up"),
-        (c4,"purple","💰","PO Value", f"₹{total_po_val/1e7:.1f} Cr", "Basic value","neutral"),
-        (c5,"green","💚","Savings", f"₹{total_savings/1e5:.1f} L", f"{savings_pct:.1f}% saved","up"),
-        (c6,"orange","⏳","Yet to Deliver", f"₹{total_yet/1e7:.1f} Cr", "Pending","down"),
-    ]
-    for col, color, icon, label, value, sub, trend in cards_r1:
-        with col:
-            st.markdown(f"""
-            <div class="kpi-card {color}">
-              <div class="kpi-icon-wrap">{icon}</div>
-              <div class="kpi-label">{label}</div>
-              <div class="kpi-value">{value}</div>
-              <div class="kpi-sub">{sub}</div>
-            </div>""", unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # KPI Row 2
-    st.markdown('<div class="kpi-grid-4">', unsafe_allow_html=True)
-    c7,c8,c9,c10 = st.columns(4)
-    cards_r2 = [
-        (c7,"blue","⚡","Avg PR→PO TAT", f"{avg_pr_po_tat:.0f} days","Procurement speed","neutral"),
-        (c8,"amber","🚛","Avg Delivery TAT", f"{avg_deliv_tat:.0f} days","PO to site","neutral"),
-        (c9,"green","🎯","OTD Rate", f"{otd_rate:.0f}%", f"{otd_ok}/{otd_total} on time","up"),
-        (c10,"pink","⛔","On Hold", f"{on_hold:,}", "Needs attention","down"),
-    ]
-    for col, color, icon, label, value, sub, trend in cards_r2:
-        with col:
-            st.markdown(f"""
-            <div class="kpi-card {color}">
-              <div class="kpi-icon-wrap">{icon}</div>
-              <div class="kpi-label">{label}</div>
-              <div class="kpi-value">{value}</div>
-              <div class="kpi-sub">{sub}</div>
-            </div>""", unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
     # Charts
-    st.markdown('<div class="section-title">📊 Business Unit Breakdown</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-header"><div class="sec-title">BU Performance Overview</div><div class="sec-badge">FY26 vs FY25</div></div>', unsafe_allow_html=True)
     st.markdown('<div class="chart-wrap">', unsafe_allow_html=True)
-    ch1, ch2 = st.columns(2)
 
-    with ch1:
-        st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        bu_grp = df.groupby("BU").agg(Count=("SN","count"), Value=("PO Basic Value","sum")).reset_index().sort_values("Value",ascending=False)
-        bu_grp["Value (Cr)"] = bu_grp["Value"]/1e7
-        fig1 = px.bar(bu_grp, x="BU", y="Value (Cr)", title="PO Value by BU (₹ Cr)",
-                      color="Value (Cr)", color_continuous_scale=["#bfdbfe","#1a56db","#0e3eb5"],
-                      text="Value (Cr)", custom_data=["Count"])
-        fig1.update_traces(texttemplate='₹%{text:.1f}Cr', textposition='outside',
-                           hovertemplate="<b>%{x}</b><br>₹%{y:.1f} Cr<br>%{customdata[0]} POs<extra></extra>",
-                           marker_line_width=0)
-        fig1.update_layout(**COMMON, height=340, margin=dict(l=10,r=10,t=50,b=20),
-                           showlegend=False, coloraxis_showscale=False,
-                           title_font=dict(size=13, color="#0f172a"))
-        st.plotly_chart(fig1, use_container_width=True)
+    c1, c2 = st.columns(2)
+
+    with c1:
+        st.markdown('<div class="chart-card"><div class="chart-card-header"><span class="chart-card-title">Spend by BU — FY26 vs FY25 (₹ Cr)</span></div>', unsafe_allow_html=True)
+        df_spend = pd.DataFrame({
+            "BU": ["O&G","Water","Railways","ZAP91"],
+            "FY26": [47.29, 201.02, 24.74, 12.67],
+            "FY25": [116.51, 245.52, 36.56, 0],
+        })
+        fig = go.Figure()
+        fig.add_trace(go.Bar(name="FY26", x=df_spend["BU"], y=df_spend["FY26"],
+                             marker_color=RED, marker_line_width=0))
+        fig.add_trace(go.Bar(name="FY25", x=df_spend["BU"], y=df_spend["FY25"],
+                             marker_color="rgba(229,62,62,0.25)", marker_line_width=0))
+        fig.update_layout(**DARK, height=300, barmode="group",
+                          title_text="", showlegend=True,
+                          legend=dict(orientation="h", y=1.1, x=1, xanchor="right"))
+        st.plotly_chart(fig, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    with ch2:
-        st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        sc = df["Current Status"].value_counts().reset_index()
-        sc.columns = ["Status","Count"]
-        sc.loc[sc["Count"] < 4, "Status"] = "Others"
-        sc = sc.groupby("Status")["Count"].sum().reset_index().sort_values("Count",ascending=False)
-        fig2 = px.pie(sc, names="Status", values="Count", title="Status Distribution",
-                      hole=0.55, color_discrete_sequence=["#1a56db","#0d9488","#7c3aed","#ea580c","#db2777","#d97706","#64748b"])
-        fig2.update_traces(textposition="outside", textinfo="percent+label", pull=[0.02]*len(sc))
-        fig2.update_layout(**COMMON, height=340, margin=dict(l=20,r=20,t=50,b=20),
-                           showlegend=False, title_font=dict(size=13, color="#0f172a"))
+    with c2:
+        st.markdown('<div class="chart-card"><div class="chart-card-header"><span class="chart-card-title">Savings Rate by BU — FY26 vs Target 4.5% (₹ Cr)</span></div>', unsafe_allow_html=True)
+        df_sav = pd.DataFrame({
+            "BU":    ["O&G","Water","Railways","ZAP91"],
+            "FY26%": [9.41,  8.32,   -8.05,    -1.58],
+            "FY25%": [11.28, 3.97,    5.77,     0],
+        })
+        fig2 = go.Figure()
+        fig2.add_trace(go.Bar(name="FY26 Savings%", x=df_sav["BU"], y=df_sav["FY26%"],
+                              marker_color=[GREEN if v>0 else RED for v in df_sav["FY26%"]],
+                              marker_line_width=0))
+        fig2.add_hline(y=4.5, line_dash="dash", line_color=AMBER,
+                       annotation_text="Target 4.5%", annotation_font_color=AMBER)
+        fig2.update_layout(**DARK, height=300, showlegend=False, title_text="")
         st.plotly_chart(fig2, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    ch3, ch4 = st.columns(2)
-    with ch3:
-        st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        bg = df.groupby("Handled by").agg(Count=("SN","count"), Value=("PO Basic Value","sum")).reset_index().sort_values("Count",ascending=True)
-        bg["Value (Cr)"] = bg["Value"]/1e7
-        fig3 = px.bar(bg, x="Count", y="Handled by", orientation="h",
-                      title="POs per Buyer", color="Value (Cr)",
-                      color_continuous_scale=["#a7f3d0","#059669","#064e3b"],
-                      text="Count", custom_data=["Value (Cr)"])
-        fig3.update_traces(textposition="outside", marker_line_width=0,
-                           hovertemplate="<b>%{y}</b><br>%{x} POs · ₹%{customdata[0]:.1f}Cr<extra></extra>")
-        fig3.update_layout(**COMMON, height=340, margin=dict(l=10,r=50,t=50,b=20),
-                           coloraxis_showscale=False, title_font=dict(size=13, color="#0f172a"))
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ════════════════════════════════════════════════════════════════════
+# TAB 2 — SPEND & SAVINGS
+# ════════════════════════════════════════════════════════════════════
+with tab2:
+
+    # KPI row
+    total_spend = 285.72
+    total_sav   = 19.44
+    sav_pct     = 6.80
+    st.markdown(f"""
+    <div class="kpi-row kpi-row-4">
+      <div class="kcard blue">
+        <div class="kcard-icon">💼</div>
+        <div class="kcard-label">Total Spend FY26</div>
+        <div class="kcard-value">₹285.7 Cr</div>
+        <div class="kcard-sub">Apr 2025 – Feb 2026</div>
+      </div>
+      <div class="kcard green">
+        <div class="kcard-icon">🏆</div>
+        <div class="kcard-label">Total Savings FY26</div>
+        <div class="kcard-value">₹19.44 Cr</div>
+        <div class="kcard-sub">6.8% of spend</div>
+        <div class="kcard-delta up">▲ Above 4.5% target</div>
+      </div>
+      <div class="kcard amber">
+        <div class="kcard-icon">📉</div>
+        <div class="kcard-label">Biggest Category</div>
+        <div class="kcard-value">Pipes</div>
+        <div class="kcard-sub">₹195.7 Cr spend · ₹15.8 Cr savings</div>
+      </div>
+      <div class="kcard purple">
+        <div class="kcard-icon">⚡</div>
+        <div class="kcard-label">Best Savings BU</div>
+        <div class="kcard-value">O&G</div>
+        <div class="kcard-sub">9.41% savings rate</div>
+        <div class="kcard-delta up">▲ vs 4.5% target</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="sec-header"><div class="sec-title">Category Spend & Savings</div><div class="sec-badge">FY26 vs FY25 · INR Crore</div></div>', unsafe_allow_html=True)
+    st.markdown('<div class="chart-wrap">', unsafe_allow_html=True)
+
+    c3, c4 = st.columns([3, 2])
+
+    with c3:
+        st.markdown('<div class="chart-card"><div class="chart-card-header"><span class="chart-card-title">Category Spend — FY26 vs FY25</span></div>', unsafe_allow_html=True)
+        df_cat = pd.DataFrame(CAT_DATA).sort_values("Spend FY26", ascending=True)
+        fig3 = go.Figure()
+        fig3.add_trace(go.Bar(name="FY26", y=df_cat["Category"], x=df_cat["Spend FY26"],
+                              orientation="h", marker_color=RED, marker_line_width=0))
+        fig3.add_trace(go.Bar(name="FY25", y=df_cat["Category"], x=df_cat["Spend FY25"],
+                              orientation="h", marker_color="rgba(229,62,62,0.2)", marker_line_width=0))
+        fig3.update_layout(**DARK, height=360, barmode="group",
+                          legend=dict(orientation="h", y=1.08, x=1, xanchor="right"))
         st.plotly_chart(fig3, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    with ch4:
-        st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        cs = df.groupby("Category")["Savings Value"].sum().reset_index()
-        cs = cs[cs["Savings Value"]>0].sort_values("Savings Value",ascending=False).head(10)
-        cs["Savings (L)"] = cs["Savings Value"]/1e5
-        fig4 = px.bar(cs, x="Category", y="Savings (L)", title="Savings by Category (₹ L)",
-                      color="Savings (L)", color_continuous_scale=["#fde68a","#f59e0b","#78350f"],
-                      text="Savings (L)")
-        fig4.update_traces(texttemplate='₹%{text:.1f}L', textposition='outside', marker_line_width=0)
-        fig4.update_layout(**COMMON, height=340, margin=dict(l=10,r=10,t=50,b=50),
-                           coloraxis_showscale=False, xaxis_tickangle=30,
-                           title_font=dict(size=13, color="#0f172a"))
+    with c4:
+        st.markdown('<div class="chart-card"><div class="chart-card-header"><span class="chart-card-title">Savings by Category FY26</span></div>', unsafe_allow_html=True)
+        df_sav_cat = pd.DataFrame(CAT_DATA).sort_values("Savings FY26", ascending=False)
+        df_sav_cat = df_sav_cat[df_sav_cat["Savings FY26"] != 0]
+        colors = [GREEN if v > 0 else RED for v in df_sav_cat["Savings FY26"]]
+        fig4 = px.bar(df_sav_cat, x="Savings FY26", y="Category",
+                      orientation="h", color="Savings FY26",
+                      color_continuous_scale=[[0,RED],[0.5,"#666"],[1,GREEN]])
+        fig4.update_layout(**DARK, height=360, showlegend=False,
+                           coloraxis_showscale=False)
         st.plotly_chart(fig4, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
+    # Spend & Savings table
+    st.markdown('<div class="sec-header"><div class="sec-title">BU-wise Spend & Savings Summary</div><div class="sec-badge">Detailed View</div></div>', unsafe_allow_html=True)
+    st.markdown('<div class="chart-wrap"><div class="chart-card" style="padding:0 0 8px;">', unsafe_allow_html=True)
+    rows = ""
+    bus = ["O&G","Water","Railways","ZAP91","Total"]
+    spends26 = [47.29, 201.02, 24.74, 12.67, 285.72]
+    savs26   = [4.91,  16.72,  -1.99, -0.20, 19.44]
+    savp26   = [9.41,  8.32,  -8.05, -1.58, 6.80]
+    spends25 = [116.51,245.52, 36.56, 0,    398.59]
+    savs25   = [13.15, 9.76,   2.11,  0,    25.02]
+    savp25   = [11.28, 3.97,   5.77,  0,     6.27]
+    tgt      = ["4.5%","4.5%","4.5%","—","—"]
+    for i, bu in enumerate(bus):
+        pill_class = "pill-green" if savp26[i] >= 4.5 else ("pill-red" if savp26[i] < 0 else "pill-amber")
+        rows += f"""<tr>
+          <td><b style="color:#eee">{bu}</b></td>
+          <td class="num">₹{spends26[i]:.1f} Cr</td>
+          <td class="num">₹{savs26[i]:.2f} Cr</td>
+          <td><span class="{pill_class}">{savp26[i]:.1f}%</span></td>
+          <td class="num" style="color:#444">{tgt[i]}</td>
+          <td class="num" style="color:#555">₹{spends25[i]:.1f} Cr</td>
+          <td class="num" style="color:#555">₹{savs25[i]:.2f} Cr</td>
+          <td class="num" style="color:#555">{savp25[i]:.1f}%</td>
+        </tr>"""
+    st.markdown(f"""
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>BU</th>
+          <th>Spend FY26</th>
+          <th>Savings FY26</th>
+          <th>Savings %</th>
+          <th>Target</th>
+          <th>Spend FY25</th>
+          <th>Savings FY25</th>
+          <th>Savings % FY25</th>
+        </tr>
+      </thead>
+      <tbody>{rows}</tbody>
+    </table>
+    """, unsafe_allow_html=True)
+    st.markdown('</div></div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — PERFORMANCE
-# ══════════════════════════════════════════════════════════════════════════════
-with tab2:
-    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
-    st.markdown('<div class="section-title">📈 Procurement Performance</div>', unsafe_allow_html=True)
+# ════════════════════════════════════════════════════════════════════
+# TAB 3 — TAT & OTD
+# ════════════════════════════════════════════════════════════════════
+with tab3:
+
+    # KPI row
+    st.markdown("""
+    <div class="kpi-row kpi-row-4">
+      <div class="kcard blue">
+        <div class="kcard-icon">⏱️</div>
+        <div class="kcard-label">CAT-2 Avg TAT FY26</div>
+        <div class="kcard-value">80.5 days</div>
+        <div class="kcard-sub">Target: 90 days</div>
+        <div class="kcard-delta up">✓ Within target</div>
+      </div>
+      <div class="kcard green">
+        <div class="kcard-icon">⚡</div>
+        <div class="kcard-label">Best TAT — Water</div>
+        <div class="kcard-value">68 days</div>
+        <div class="kcard-sub">vs 72.9 days FY25</div>
+        <div class="kcard-delta up">▲ Improved</div>
+      </div>
+      <div class="kcard red">
+        <div class="kcard-icon">🎯</div>
+        <div class="kcard-label">CAT-2 OTIF FY26</div>
+        <div class="kcard-value">70.61%</div>
+        <div class="kcard-sub">Target: 75%</div>
+        <div class="kcard-delta down">▼ -4.4pp vs target</div>
+      </div>
+      <div class="kcard amber">
+        <div class="kcard-icon">📊</div>
+        <div class="kcard-label">Best OTIF — Railways</div>
+        <div class="kcard-value">72.83%</div>
+        <div class="kcard-sub">vs 68.6% FY25</div>
+        <div class="kcard-delta up">▲ +4.2pp YoY</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="sec-header"><div class="sec-title">TAT & OTIF Analysis</div><div class="sec-badge">FY26 vs FY25 vs Target</div></div>', unsafe_allow_html=True)
     st.markdown('<div class="chart-wrap">', unsafe_allow_html=True)
 
-    ch5, ch6 = st.columns(2)
-    with ch5:
-        st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        tat = df.groupby("Handled by")["PR - PO TAT"].mean().reset_index().dropna()
-        tat.columns = ["Buyer","Avg TAT"]
-        tat = tat.sort_values("Avg TAT")
-        fig5 = px.bar(tat, x="Avg TAT", y="Buyer", orientation="h",
-                      title="Avg PR→PO TAT by Buyer (Days)",
-                      color="Avg TAT", color_continuous_scale=["#86efac","#f97316","#dc2626"],
-                      text="Avg TAT")
-        fig5.update_traces(texttemplate='%{text:.0f}d', textposition='outside', marker_line_width=0)
-        fig5.update_layout(**COMMON, height=360, margin=dict(l=10,r=50,t=50,b=20),
-                           coloraxis_showscale=False, title_font=dict(size=13,color="#0f172a"))
+    c5, c6 = st.columns(2)
+
+    with c5:
+        st.markdown('<div class="chart-card"><div class="chart-card-header"><span class="chart-card-title">OTIF by BU — FY26 vs FY25 vs Target 75%</span></div>', unsafe_allow_html=True)
+        df_otif = pd.DataFrame(OTIF_DATA)
+        fig5 = go.Figure()
+        fig5.add_trace(go.Bar(name="FY26", x=df_otif["BU"], y=df_otif["FY26"],
+                              marker_color=RED, marker_line_width=0))
+        fig5.add_trace(go.Bar(name="FY25", x=df_otif["BU"], y=df_otif["FY25"],
+                              marker_color="rgba(229,62,62,0.3)", marker_line_width=0))
+        fig5.add_hline(y=75, line_dash="dash", line_color=AMBER,
+                       annotation_text="Target 75%", annotation_font_color=AMBER)
+        fig5.update_layout(**DARK, height=320, barmode="group",
+                          yaxis=dict(range=[60,85], **DARK["yaxis"]),
+                          legend=dict(orientation="h", y=1.1, x=1, xanchor="right"))
         st.plotly_chart(fig5, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    with ch6:
-        st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        trend = df.dropna(subset=["PO Dt."]).copy()
-        trend["Month"] = trend["PO Dt."].dt.to_period("M").astype(str)
-        monthly = trend.groupby("Month").agg(Count=("SN","count"), Value=("PO Basic Value","sum")).reset_index().tail(18)
-        monthly["Value (Cr)"] = monthly["Value"]/1e7
+    with c6:
+        st.markdown('<div class="chart-card"><div class="chart-card-header"><span class="chart-card-title">PR→PO TAT by BU — FY26 vs FY25 vs Target 90d</span></div>', unsafe_allow_html=True)
+        df_tat = pd.DataFrame(TAT_DATA)
         fig6 = go.Figure()
-        fig6.add_trace(go.Bar(x=monthly["Month"], y=monthly["Count"],
-                              name="Count", marker_color="#bfdbfe", yaxis="y"))
-        fig6.add_trace(go.Scatter(x=monthly["Month"], y=monthly["Value (Cr)"],
-                                  name="₹Cr", line=dict(color="#1a56db",width=2.5),
-                                  mode="lines+markers", marker=dict(size=5,color="#1a56db"), yaxis="y2"))
-        fig6.update_layout(**COMMON, title="Monthly PO Trend",
-                           height=360, margin=dict(l=10,r=60,t=50,b=70),
-                           legend=dict(orientation="h",y=-0.25),
-                           xaxis=dict(tickangle=45),
-                           yaxis=dict(title="Count"),
-                           yaxis2=dict(title="₹ Cr", overlaying="y", side="right"),
-                           title_font=dict(size=13,color="#0f172a"))
+        fig6.add_trace(go.Bar(name="FY26 TAT", x=df_tat["BU"], y=df_tat["FY26 TAT"],
+                              marker_color=BLUE, marker_line_width=0))
+        fig6.add_trace(go.Bar(name="FY25 TAT", x=df_tat["BU"], y=df_tat["FY25 TAT"],
+                              marker_color="rgba(49,130,206,0.3)", marker_line_width=0))
+        fig6.add_hline(y=90, line_dash="dash", line_color=AMBER,
+                       annotation_text="Target 90d", annotation_font_color=AMBER)
+        fig6.update_layout(**DARK, height=320, barmode="group",
+                          legend=dict(orientation="h", y=1.1, x=1, xanchor="right"))
         st.plotly_chart(fig6, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    ch7, ch8 = st.columns(2)
-    with ch7:
-        st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        cv = df.groupby("Category")["PO Basic Value"].sum().reset_index().sort_values("PO Basic Value",ascending=False).head(10)
-        cv["Value (Cr)"] = cv["PO Basic Value"]/1e7
-        fig7 = px.pie(cv, names="Category", values="Value (Cr)", title="Value by Category — Top 10",
-                      hole=0.45, color_discrete_sequence=px.colors.qualitative.Vivid)
-        fig7.update_traces(textposition="outside", textinfo="percent+label")
-        fig7.update_layout(**COMMON, height=380, margin=dict(l=20,r=20,t=50,b=20),
-                           showlegend=False, title_font=dict(size=13,color="#0f172a"))
+    # PO Count chart
+    c7, c8 = st.columns(2)
+    with c7:
+        st.markdown('<div class="chart-card" style="margin-top:14px"><div class="chart-card-header"><span class="chart-card-title">PO Count by BU — FY26 vs FY25</span></div>', unsafe_allow_html=True)
+        fig7 = go.Figure()
+        fig7.add_trace(go.Bar(name="FY26", x=df_tat["BU"], y=df_tat["FY26 PO"],
+                              marker_color=RED, marker_line_width=0,
+                              text=df_tat["FY26 PO"], textposition="outside",
+                              textfont=dict(color="#aaa", size=11)))
+        fig7.add_trace(go.Bar(name="FY25", x=df_tat["BU"], y=df_tat["FY25 PO"],
+                              marker_color="rgba(229,62,62,0.2)", marker_line_width=0))
+        fig7.update_layout(**DARK, height=300, barmode="group",
+                          legend=dict(orientation="h", y=1.1, x=1, xanchor="right"))
         st.plotly_chart(fig7, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-    with ch8:
-        st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        ps = df.groupby("Project Name").agg(Savings=("Savings Value","sum"), Value=("PO Basic Value","sum")).reset_index()
-        ps = ps[ps["Value"]>0].copy()
-        ps["Savings %"] = ps["Savings"]/ps["Value"]*100
-        ps = ps[ps["Savings"]>0].sort_values("Savings",ascending=False).head(12)
-        ps["Savings (L)"] = ps["Savings"]/1e5
-        fig8 = px.bar(ps, x="Savings (L)", y="Project Name", orientation="h",
-                      title="Top 12 Projects by Savings",
-                      color="Savings %", color_continuous_scale=["#a7f3d0","#16a34a","#14532d"],
-                      text="Savings %", custom_data=["Savings (L)"])
-        fig8.update_traces(texttemplate='%{text:.1f}%', textposition='outside', marker_line_width=0)
-        fig8.update_layout(**COMMON, height=380, margin=dict(l=10,r=60,t=50,b=20),
-                           coloraxis_showscale=False, title_font=dict(size=13,color="#0f172a"))
+    with c8:
+        st.markdown('<div class="chart-card" style="margin-top:14px"><div class="chart-card-header"><span class="chart-card-title">OTIF Trend — FY26 vs Target (Radar)</span></div>', unsafe_allow_html=True)
+        categories = ["O&G","Water","Railways","CAT-2","O&G"]
+        fy26_vals  = [68.0, 71.0, 72.83, 70.61, 68.0]
+        tgt_vals   = [75, 75, 75, 75, 75]
+        fig8 = go.Figure()
+        fig8.add_trace(go.Scatterpolar(r=fy26_vals, theta=categories, fill="toself",
+                                       name="FY26 OTIF", line=dict(color=RED, width=2),
+                                       fillcolor="rgba(229,62,62,0.15)"))
+        fig8.add_trace(go.Scatterpolar(r=tgt_vals, theta=categories, fill="toself",
+                                       name="Target 75%", line=dict(color=AMBER, width=1.5, dash="dash"),
+                                       fillcolor="rgba(214,158,46,0.05)"))
+        fig8.update_layout(**DARK, height=300,
+                          polar=dict(
+                              bgcolor="rgba(0,0,0,0)",
+                              radialaxis=dict(range=[60,80], gridcolor="rgba(255,255,255,0.07)", tickcolor="#333", linecolor="#333", tickfont=dict(color="#555")),
+                              angularaxis=dict(gridcolor="rgba(255,255,255,0.07)", tickfont=dict(color="#888"))
+                          ),
+                          legend=dict(orientation="h", y=-0.1, x=0.5, xanchor="center"))
         st.plotly_chart(fig8, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — DELIVERY
-# ══════════════════════════════════════════════════════════════════════════════
-with tab3:
-    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
-    st.markdown('<div class="section-title">🚚 Delivery & OTD Analysis</div>', unsafe_allow_html=True)
-    st.markdown('<div class="chart-wrap">', unsafe_allow_html=True)
-
-    ch9, ch10 = st.columns(2)
-    with ch9:
-        st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        db = df.groupby(["BU","Delivery Status"]).size().reset_index(name="Count")
-        fig9 = px.bar(db, x="BU", y="Count", color="Delivery Status",
-                      title="Delivery Status by BU",
-                      color_discrete_map={"Completed":"#059669","Ongoing":"#1a56db","Shortclose":"#dc2626"},
-                      barmode="stack", text_auto=True)
-        fig9.update_layout(**COMMON, height=360, margin=dict(l=10,r=10,t=50,b=20),
-                           legend=dict(orientation="h",y=-0.15),
-                           title_font=dict(size=13,color="#0f172a"))
-        st.plotly_chart(fig9, use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    with ch10:
-        st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        tb = df.groupby("BU")["Actual Delivery TAT (Days)"].mean().reset_index().dropna()
-        tb.columns = ["BU","Avg TAT"]
-        tb = tb.sort_values("Avg TAT",ascending=False)
-        fig10 = px.bar(tb, x="BU", y="Avg TAT", title="Avg Delivery TAT by BU (Days)",
-                       color="Avg TAT", color_continuous_scale=["#86efac","#f97316","#dc2626"],
-                       text="Avg TAT")
-        fig10.update_traces(texttemplate='%{text:.0f}d', textposition='outside', marker_line_width=0)
-        fig10.update_layout(**COMMON, height=360, margin=dict(l=10,r=10,t=50,b=20),
-                            coloraxis_showscale=False, title_font=dict(size=13,color="#0f172a"))
-        st.plotly_chart(fig10, use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    df_otd = df.dropna(subset=["OTD","OTIF","PO Basic Value"]).copy()
-    if len(df_otd) > 0:
-        df_otd["OTD %"]  = df_otd["OTD"]  * 100
-        df_otd["OTIF %"] = df_otd["OTIF"] * 100
-        st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        fig11 = px.scatter(df_otd, x="OTD %", y="OTIF %",
-                           color="BU", size="PO Basic Value", size_max=28,
-                           hover_data=["Supplier Name","Project Name","Category","PO/ OD Ref."],
-                           title="OTD vs OTIF — Bubble = PO Value",
-                           color_discrete_sequence=px.colors.qualitative.Bold)
-        fig11.add_hline(y=100, line_dash="dash", line_color="#dc2626", line_width=1)
-        fig11.add_vline(x=100, line_dash="dash", line_color="#059669", line_width=1)
-        fig11.update_layout(**COMMON, height=420, margin=dict(l=10,r=10,t=50,b=20),
-                            legend=dict(orientation="h",y=-0.12),
-                            title_font=dict(size=13,color="#0f172a"))
-        st.plotly_chart(fig11, use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    if YET_COL in df.columns and DELIV_COL in df.columns:
-        dv = df.groupby("BU").agg(Delivered=(DELIV_COL,"sum"), Yet=(YET_COL,"sum")).reset_index()
-        dv["Delivered (Cr)"] = dv["Delivered"]/1e7
-        dv["Yet (Cr)"]       = dv["Yet"]/1e7
-        dvm = dv.melt(id_vars="BU", value_vars=["Delivered (Cr)","Yet (Cr)"],
-                      var_name="Type", value_name="Value (Cr)")
-        st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        fig12 = px.bar(dvm, x="BU", y="Value (Cr)", color="Type",
-                       title="Delivered vs Yet-to-Deliver by BU (₹ Cr, incl. GST)",
-                       color_discrete_map={"Delivered (Cr)":"#059669","Yet (Cr)":"#ea580c"},
-                       barmode="group", text_auto=True)
-        fig12.update_traces(texttemplate='₹%{text:.1f}Cr', marker_line_width=0)
-        fig12.update_layout(**COMMON, height=360, margin=dict(l=10,r=10,t=50,b=20),
-                            legend=dict(orientation="h",y=-0.15),
-                            title_font=dict(size=13,color="#0f172a"))
-        st.plotly_chart(fig12, use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 4 — DATA TABLE
-# ══════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════
+# TAB 4 — CREDIT METRIC
+# ════════════════════════════════════════════════════════════════════
 with tab4:
-    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
-    st.markdown('<div class="section-title">📋 Full Data View</div>', unsafe_allow_html=True)
+
+    # Latest month score
+    latest_score = CREDIT_FY26[-1]
+    latest_spend = SPEND_MONTHLY[-1]
+    avg_score_fy26 = sum(CREDIT_FY26)/len(CREDIT_FY26)
+
+    st.markdown(f"""
+    <div class="kpi-row kpi-row-4">
+      <div class="kcard {'green' if avg_score_fy26 >= 4.5 else 'amber'}">
+        <div class="kcard-icon">⭐</div>
+        <div class="kcard-label">Avg Credit Score FY26</div>
+        <div class="kcard-value">{avg_score_fy26:.2f}</div>
+        <div class="kcard-sub">Target: 4.5 | Higher = better</div>
+        <div class="kcard-delta up">▲ Above target</div>
+      </div>
+      <div class="kcard {'green' if latest_score >= 4.5 else 'red'}">
+        <div class="kcard-icon">📅</div>
+        <div class="kcard-label">Latest Month (Feb'26)</div>
+        <div class="kcard-value">{latest_score:.2f}</div>
+        <div class="kcard-sub">Spend: ₹{latest_spend:.1f} Cr</div>
+        <div class="kcard-delta {'up' if latest_score >= 4.5 else 'down'}">{'▲ Above' if latest_score >= 4.5 else '▼ Below'} target 4.5</div>
+      </div>
+      <div class="kcard blue">
+        <div class="kcard-icon">💹</div>
+        <div class="kcard-label">Best Month Score</div>
+        <div class="kcard-value">{max(CREDIT_FY26):.2f}</div>
+        <div class="kcard-sub">May'25 · Spend ₹166.2 Cr</div>
+        <div class="kcard-delta up">▲ Peak performance</div>
+      </div>
+      <div class="kcard red">
+        <div class="kcard-icon">⚠️</div>
+        <div class="kcard-label">Lowest Month Score</div>
+        <div class="kcard-value">{min(CREDIT_FY26):.2f}</div>
+        <div class="kcard-sub">Jan'26 · Needs attention</div>
+        <div class="kcard-delta down">▼ Below target 4.5</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="sec-header"><div class="sec-title">Credit Metric Trend — FY26 vs FY25 vs Target</div><div class="sec-badge">Monthly · Higher score = better payment terms</div></div>', unsafe_allow_html=True)
     st.markdown('<div class="chart-wrap">', unsafe_allow_html=True)
+    st.markdown('<div class="chart-card"><div class="chart-card-header"><span class="chart-card-title">Payment Terms Credit Score (Weighted Avg) + Monthly Spend</span></div>', unsafe_allow_html=True)
 
-    srch = st.text_input("🔍 Search by Project / Supplier / PO Number / Category", placeholder="Type to filter…")
+    fig9 = go.Figure()
+    fig9.add_trace(go.Bar(name="Monthly Spend (₹Cr)", x=CREDIT_MONTHS, y=SPEND_MONTHLY,
+                          marker_color="rgba(229,62,62,0.2)", marker_line_width=0, yaxis="y"))
+    fig9.add_trace(go.Scatter(name="FY26 Score", x=CREDIT_MONTHS, y=CREDIT_FY26,
+                              line=dict(color=RED, width=2.5), mode="lines+markers",
+                              marker=dict(size=6, color=RED), yaxis="y2"))
+    fig9.add_trace(go.Scatter(name="FY25 Score", x=CREDIT_MONTHS, y=CREDIT_FY25,
+                              line=dict(color="rgba(229,62,62,0.35)", width=1.5, dash="dot"),
+                              mode="lines+markers", marker=dict(size=4), yaxis="y2"))
+    fig9.add_trace(go.Scatter(name="Target 4.5", x=CREDIT_MONTHS, y=CREDIT_TARGET,
+                              line=dict(color=AMBER, width=1.5, dash="dash"),
+                              mode="lines", yaxis="y2"))
+    fig9.update_layout(
+        **DARK, height=380,
+        yaxis=dict(title="Spend (₹ Cr)", gridcolor="rgba(255,255,255,0.04)", tickcolor="#333", linecolor="#333"),
+        yaxis2=dict(title="Credit Score", overlaying="y", side="right",
+                    gridcolor="rgba(255,255,255,0.02)", tickcolor="#333"),
+        legend=dict(orientation="h", y=1.1, x=1, xanchor="right"),
+    )
+    st.plotly_chart(fig9, use_container_width=True)
+    st.markdown('</div></div>', unsafe_allow_html=True)
 
-    SHOW = ["SN","BU","Project Name","Items","Category","Handled by",
-            "PR Dt.","Supplier Name","PO/ OD Ref.","PO Dt.",
-            "PO Basic Value","Savings Value","Savings %",
-            "Delivery Status","Current Status",
-            "Delivery Date at Project Site","PR - PO TAT","Actual Delivery TAT (Days)", YET_COL]
-    SHOW = [c for c in SHOW if c in df.columns]
-    df_tbl = df[SHOW].copy()
-
-    if srch:
-        mask = df_tbl.apply(lambda r: r.astype(str).str.contains(srch, case=False).any(), axis=1)
-        df_tbl = df_tbl[mask]
-
-    for c in ["PO Basic Value","Savings Value",YET_COL]:
-        if c in df_tbl.columns:
-            df_tbl[c] = df_tbl[c].apply(lambda x: f"₹{x/1e5:.1f}L" if pd.notna(x) and x!=0 else "—")
-    if "Savings %" in df_tbl.columns:
-        df_tbl["Savings %"] = df_tbl["Savings %"].apply(
-            lambda x: f"{float(x)*100:.1f}%" if pd.notna(x) and str(x).strip() not in ["","nan"] else "—"
-        )
-
-    st.markdown(f"**{len(df_tbl):,} records** matching filters", unsafe_allow_html=False)
-    st.dataframe(df_tbl.reset_index(drop=True), use_container_width=True, hide_index=True, height=500)
-
-    csv = df[SHOW].to_csv(index=False).encode("utf-8")
-    st.download_button("⬇️ Export CSV", csv, "po_tracker_export.csv", "text/csv")
+    # Score breakdown table
+    st.markdown('<div class="sec-header"><div class="sec-title">Monthly Score Breakdown</div><div class="sec-badge">FY26</div></div>', unsafe_allow_html=True)
+    rows2 = ""
+    for i, m in enumerate(CREDIT_MONTHS):
+        s26 = CREDIT_FY26[i]; s25 = CREDIT_FY25[i]
+        sp  = SPEND_MONTHLY[i]
+        pill = "pill-green" if s26 >= 4.5 else ("pill-red" if s26 < 3 else "pill-amber")
+        delta = s26 - s25
+        dclass = "up" if delta > 0 else "down"
+        rows2 += f"""<tr>
+          <td><b style="color:#ccc">{m}'{'26' if i <= 10 else '25'}</b></td>
+          <td class="num">₹{sp:.1f} Cr</td>
+          <td><span class="{pill}">{s26:.2f}</span></td>
+          <td class="num" style="color:#555">{s25:.2f}</td>
+          <td class="num" style="color:#555">4.5</td>
+          <td><span style="color:{'#68d391' if delta>0 else '#fc8181'}; font-size:12px; font-family:'DM Mono',monospace;">{'+' if delta>0 else ''}{delta:.2f}</span></td>
+          <td><span class="{'pill-green' if s26>=4.5 else 'pill-red'}">{('On Track' if s26>=4.5 else 'Below Target')}</span></td>
+        </tr>"""
+    st.markdown(f"""
+    <div class="chart-wrap"><div class="chart-card" style="padding:0 0 8px;">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Month</th>
+          <th>PO Spend</th>
+          <th>FY26 Score</th>
+          <th>FY25 Score</th>
+          <th>Target</th>
+          <th>YoY Change</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>{rows2}</tbody>
+    </table>
+    </div></div>
+    """, unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ── Footer ────────────────────────────────────────────────────────────────────
+# ── FOOTER ────────────────────────────────────────────────────────────────────
 st.markdown(f"""
-<div style="background:#0a0f1e; padding:16px 2rem; margin-top:24px;
-            border-top:1px solid rgba(255,255,255,0.06);">
-  <div style="display:flex; align-items:center; justify-content:space-between;">
-    <div style="display:flex; align-items:center; gap:8px;">
-      <span style="font-size:14px;">📦</span>
-      <span style="font-size:12px; color:rgba(255,255,255,0.35);">
-        PO Tracker · Central Procurement · Zetwerk
-      </span>
-    </div>
-    <div style="font-size:12px; color:rgba(255,255,255,0.25);">
-      {total_rows:,} records · refreshed {pd.Timestamp.now().strftime('%d %b %Y %H:%M')}
-    </div>
+<div class="footer">
+  <div class="footer-left">
+    ⚡ Zetwerk Central Procurement Dashboard · CAT-2 · FY 2025–26
+  </div>
+  <div class="footer-right">
+    Last updated: {pd.Timestamp.now().strftime('%d %b %Y %H:%M')} · Data: Google Sheets + Backup Excel
   </div>
 </div>
 """, unsafe_allow_html=True)
