@@ -706,9 +706,10 @@ with tab2:
         fig3.add_trace(go.Scatter(name='Savings', x=monthly['Month_str'], y=monthly['sav_cr'],
                                   line=dict(color=GREEN, width=2.5), mode='lines+markers',
                                   marker=dict(size=5), yaxis='y2'))
-        fig3.update_layout(**DARK, height=300, title_text='Monthly Spend vs Savings',
+        _dark3 = {k:v for k,v in DARK.items() if k not in ('yaxis','legend')}
+        fig3.update_layout(**_dark3, height=300, title_text='Monthly Spend vs Savings',
                            barmode='group',
-                           yaxis=dict(title='Spend ₹Cr', **DARK['yaxis']),
+                           yaxis=dict(title='Spend ₹Cr', gridcolor='rgba(255,255,255,0.05)', tickcolor='#333', linecolor='#333'),
                            yaxis2=dict(title='Savings ₹Cr', overlaying='y', side='right', gridcolor='rgba(0,0,0,0)'),
                            legend=dict(orientation='h', y=1.12, x=1, xanchor='right', bgcolor='rgba(0,0,0,0)', font=dict(color='#888',size=10)))
         st.plotly_chart(fig3, use_container_width=True)
@@ -861,9 +862,10 @@ with tab4:
                 ))
                 fig6.add_hline(y=4.5, line_dash='dash', line_color=AMBER,
                                annotation_text='Target 4.5', annotation_font_color=AMBER)
-                fig6.update_layout(**DARK, height=300,
+                _dark6 = {k:v for k,v in DARK.items() if k not in ('yaxis','legend')}
+                fig6.update_layout(**_dark6, height=300,
                                    title_text='Monthly WC Score vs PO Spend',
-                                   yaxis=dict(title='Spend ₹Cr', **DARK['yaxis']),
+                                   yaxis=dict(title='Spend ₹Cr', gridcolor='rgba(255,255,255,0.05)', tickcolor='#333', linecolor='#333'),
                                    yaxis2=dict(title='Score', overlaying='y', side='right',
                                                gridcolor='rgba(0,0,0,0)'),
                                    legend=dict(orientation='h', y=1.12, x=1, xanchor='right',
