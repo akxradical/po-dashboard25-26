@@ -242,15 +242,15 @@ def chat_with_buddy(messages, df):
                 api_messages.append(msg)
     
     try:
-        # Get API key from secrets
+        # Get API key from secrets - try all possible key names
         api_key = ""
-        for key_name in ["ANTHROPIC_API_KEY", "anthropic_api_key", "ANTHROPIC_KEY"]:
+        for key_name in ["ANTHROPIC_API_KEY", "anthropic_api_key", "ANTHROPIC_KEY", "api_key"]:
             try:
                 api_key = st.secrets[key_name]
-                break
+                if api_key: break
             except: pass
         if not api_key:
-            return "CAT 2 Buddy needs an API key. Please add ANTHROPIC_API_KEY to Streamlit secrets."
+            return "I'm still warming up — please ask your admin to configure my settings."
 
         resp = requests.post(
             "https://api.anthropic.com/v1/messages",
@@ -598,21 +598,34 @@ savings_pct = (total_savings / total_spend * 100) if total_spend > 0 else 0
 tat_vals = pd.to_numeric(dff['PR - PO TAT'], errors='coerce')
 avg_tat = tat_vals[tat_vals > 0].mean()
 
-# OTIF: ratio where <= 1.05 means delivered on time (1.0 = exactly on time)
-# OTD: ratio where <= 1.0 means on time delivery
+# OTIF & OTD — only count COMPLETED POs with all required data filled
+# OTD ratio = Actual delivery TAT / Planned TAT — <=1.0 means on time
+# OTIF ratio = Actual qty / PO qty — <=1.05 means full qty delivered on time
 otif_pct = 0
-otd_pct = 0
-if 'OTIF' in dff.columns:
-    otif_vals = pd.to_numeric(dff['OTIF'], errors='coerce').dropna()
-    otif_vals = otif_vals[otif_vals > 0]
-    if len(otif_vals) > 0:
-        otif_pct = (otif_vals <= 1.05).sum() / len(otif_vals) * 100
+otd_pct  = 0
+otif_base = 0
+otd_base  = 0
 
-if 'OTD' in dff.columns:
-    otd_vals = pd.to_numeric(dff['OTD'], errors='coerce').dropna()
-    otd_vals = otd_vals[otd_vals > 0]
-    if len(otd_vals) > 0:
-        otd_pct = (otd_vals <= 1.0).sum() / len(otd_vals) * 100
+# Get completed rows only (only rows where delivery is done have valid OTD/OTIF)
+completed_mask = pd.Series([True] * len(dff), index=dff.index)
+if 'Delivery Status' in dff.columns:
+    completed_mask = dff['Delivery Status'].str.strip().str.lower().isin(['completed', 'shortclose'])
+
+completed_df = dff[completed_mask]
+
+if 'OTD' in dff.columns and len(completed_df) > 0:
+    otd_vals = pd.to_numeric(completed_df['OTD'], errors='coerce').dropna()
+    otd_vals = otd_vals[otd_vals > 0]  # ignore empty/zero rows
+    otd_base = len(otd_vals)
+    if otd_base > 0:
+        otd_pct = (otd_vals <= 1.0).sum() / otd_base * 100
+
+if 'OTIF' in dff.columns and len(completed_df) > 0:
+    otif_vals = pd.to_numeric(completed_df['OTIF'], errors='coerce').dropna()
+    otif_vals = otif_vals[otif_vals > 0]  # ignore empty/zero rows
+    otif_base = len(otif_vals)
+    if otif_base > 0:
+        otif_pct = (otif_vals <= 1.05).sum() / otif_base * 100
 
 # New Vendor Development
 nv_pct = 0
@@ -678,10 +691,10 @@ with tab1:
     st.markdown(f"""
     <div class="krow k4">
       <div class="kcard kc-{'green' if otif_pct >= 75 else 'red'}">
-        <div class="klabel">OTIF</div>
+        <div class="klabel">OTIF / OTD</div>
         <div class="kvalue">{otif_pct:.1f}%</div>
-        <div class="ksub">OTD: {otd_pct:.1f}% | Target: 75%</div>
-        <div class="kdelta {'kup' if otif_pct >= 75 else 'kdown'}">{'✓ On target' if otif_pct >= 75 else '▼ Below target'}</div>
+        <div class="ksub">OTD: {otd_pct:.1f}% | {otif_base} completed POs</div>
+        <div class="kdelta {'kup' if otif_pct >= 75 else 'kdown'}">{'✓ Above 75% target' if otif_pct >= 75 else '▼ Below 75% target'}</div>
       </div>
       <div class="kcard kc-{'green' if 10 <= nv_pct <= 15 else 'amber'}">
         <div class="klabel">New Vendor Dev</div>
@@ -830,13 +843,14 @@ with tab3:
     with c1:
         st.metric("Avg PR-PO TAT", f"{avg_tat:.0f} days", f"{avg_tat-90:.0f}d vs 90d target")
     with c2:
-        st.metric("OTIF", f"{otif_pct:.1f}%", f"{otif_pct-75:.1f}pp vs 75% target")
+        st.metric("OTIF", f"{otif_pct:.1f}%", f"{otif_base} completed POs" if otif_base > 0 else "No data yet")
     with c3:
-        st.metric("OTD", f"{otd_pct:.1f}%", f"{otd_pct-75:.1f}pp vs 75% target")
+        st.metric("OTD", f"{otd_pct:.1f}%", f"{otd_base} completed POs" if otd_base > 0 else "No data yet")
     with c4:
         if 'Delivery Status' in dff.columns:
-            completed = len(dff[dff['Delivery Status'].str.contains('Completed', case=False, na=False)])
-            st.metric("Completed Deliveries", str(completed))
+            n_completed = len(dff[dff['Delivery Status'].str.strip().str.lower().isin(['completed','shortclose'])])
+            n_ongoing = len(dff[dff['Delivery Status'].str.strip().str.lower() == 'ongoing'])
+            st.metric("Completed / Ongoing", f"{n_completed} / {n_ongoing}")
     
     c1, c2 = st.columns(2)
     
@@ -863,9 +877,11 @@ with tab3:
     with c2:
         if 'OTIF' in dff.columns:
             def calc_otif_pct(x):
-                vals = pd.to_numeric(x['OTIF'], errors='coerce').dropna()
+                # Only completed rows
+                done_mask = x['Delivery Status'].str.strip().str.lower().isin(['completed','shortclose']) if 'Delivery Status' in x.columns else pd.Series([True]*len(x), index=x.index)
+                vals = pd.to_numeric(x[done_mask]['OTIF'], errors='coerce').dropna()
                 vals = vals[vals > 0]
-                return (vals <= 1.05).sum() / len(vals) * 100 if len(vals) > 0 else 0
+                return (vals <= 1.05).sum() / len(vals) * 100 if len(vals) > 0 else None
             bu_otif = dff.groupby('BU').apply(calc_otif_pct).reset_index()
             bu_otif.columns = ['BU','OTIF%']
             bu_otif = bu_otif.dropna()
