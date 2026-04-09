@@ -277,77 +277,46 @@ def chat_with_buddy(messages, df):
 
 # ── SPLASH SCREEN ─────────────────────────────────────────────────────────────
 if 'loaded' not in st.session_state:
+    # Show branded splash while loading
     splash = st.empty()
-    with splash.container():
-        st.markdown("""
-        <style>
-        @keyframes spin { to{transform:rotate(360deg)} }
-        @keyframes fadeUp { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
-        @keyframes shimmer { 0%{background-position:-400px 0} 100%{background-position:400px 0} }
-        .splash {
-            position:fixed; inset:0; background:#0e0e12;
-            display:flex; align-items:center; justify-content:center;
-            flex-direction:column; z-index:9999;
-        }
-        .splash-ring {
-            width:72px; height:72px;
-            border:2px solid rgba(229,62,62,0.3);
-            border-top:2px solid #e53e3e;
-            border-radius:50%;
-            animation:spin 1.2s linear infinite;
-            position:relative; margin-bottom:28px;
-        }
-        .splash-z {
-            position:absolute; top:50%; left:50%;
-            transform:translate(-50%,-50%);
-            width:50px; height:50px;
-            background:linear-gradient(135deg,#e53e3e,#fc4f4f);
-            border-radius:12px;
-            display:flex; align-items:center; justify-content:center;
-            font-size:22px; font-weight:900; color:white;
-            font-family:'DM Sans',sans-serif;
-        }
-        .splash-title {
-            font-family:'DM Sans',sans-serif; font-size:22px;
-            font-weight:700; color:#fff; letter-spacing:-0.03em;
-            animation:fadeUp 0.6s ease 0.2s both;
-        }
-        .splash-sub {
-            font-family:'DM Sans',sans-serif; font-size:12px;
-            color:#444; text-transform:uppercase; letter-spacing:0.1em;
-            animation:fadeUp 0.6s ease 0.4s both; margin-top:6px;
-        }
-        .splash-bar {
-            width:280px; height:3px;
-            background:rgba(255,255,255,0.06);
-            border-radius:99px; overflow:hidden;
-            margin-top:28px; animation:fadeUp 0.6s ease 0.5s both;
-        }
-        .splash-bar-inner {
-            height:100%;
-            background:linear-gradient(90deg,transparent,#e53e3e,#fc8181,#e53e3e,transparent);
-            background-size:400px 100%;
-            animation:shimmer 1.4s ease infinite;
-        }
-        .splash-status {
-            font-family:'DM Sans',sans-serif; font-size:11px;
-            color:#333; margin-top:14px; letter-spacing:0.06em;
-        }
-        </style>
-        <div class="splash">
-          <div class="splash-ring"><div class="splash-z">Z</div></div>
-          <div class="splash-title">Zetwerk CPT</div>
-          <div class="splash-sub">Central Procurement · CAT-2</div>
-          <div class="splash-bar"><div class="splash-bar-inner"></div></div>
-          <div class="splash-status">Loading live data from Google Sheets...</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
+    splash.markdown("""
+    <style>
+    @keyframes zspin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
+    @keyframes zfade { 0%{opacity:0;transform:translateY(12px)} 100%{opacity:1;transform:translateY(0)} }
+    @keyframes zpulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    </style>
+    <div style="position:fixed;inset:0;background:#0e0e12;display:flex;align-items:center;
+         justify-content:center;flex-direction:column;z-index:9999;">
+      <div style="position:relative;width:80px;height:80px;margin-bottom:24px;">
+        <div style="position:absolute;inset:0;border-radius:50%;
+             border:2px solid rgba(229,62,62,0.2);
+             border-top:2px solid #e53e3e;
+             animation:zspin 1s linear infinite;"></div>
+        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+             width:54px;height:54px;background:linear-gradient(135deg,#e53e3e,#ff6b6b);
+             border-radius:14px;display:flex;align-items:center;justify-content:center;
+             font-size:26px;font-weight:900;color:white;font-family:sans-serif;">Z</div>
+      </div>
+      <div style="font-size:20px;font-weight:700;color:#fff;letter-spacing:-0.02em;
+           animation:zfade 0.5s ease 0.1s both;font-family:sans-serif;">Zetwerk CPT</div>
+      <div style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:0.12em;
+           margin-top:6px;animation:zfade 0.5s ease 0.3s both;font-family:sans-serif;">
+           Central Procurement · CAT-2</div>
+      <div style="margin-top:24px;width:200px;height:2px;background:rgba(255,255,255,0.06);border-radius:99px;overflow:hidden;">
+        <div style="height:100%;width:40%;background:#e53e3e;border-radius:99px;
+             animation:zpulse 1.2s ease infinite;"></div>
+      </div>
+      <div style="font-size:11px;color:#333;margin-top:12px;font-family:sans-serif;">
+           Connecting to Google Sheets...</div>
+    </div>
+    """, unsafe_allow_html=True)
+
     df_main = load_sheet_data()
-    time.sleep(1)
+    time.sleep(0.5)
     splash.empty()
     st.session_state['loaded'] = True
     st.session_state['df'] = df_main
+    st.rerun()
 else:
     df_main = st.session_state.get('df', pd.DataFrame())
 
@@ -876,15 +845,16 @@ with tab3:
     
     with c2:
         if 'OTIF' in dff.columns:
-            def calc_otif_pct(x):
-                # Only completed rows
-                done_mask = x['Delivery Status'].str.strip().str.lower().isin(['completed','shortclose']) if 'Delivery Status' in x.columns else pd.Series([True]*len(x), index=x.index)
-                vals = pd.to_numeric(x[done_mask]['OTIF'], errors='coerce').dropna()
-                vals = vals[vals > 0]
-                return (vals <= 1.05).sum() / len(vals) * 100 if len(vals) > 0 else None
-            bu_otif = dff.groupby('BU').apply(calc_otif_pct).reset_index()
-            bu_otif.columns = ['BU','OTIF%']
-            bu_otif = bu_otif.dropna()
+            bu_otif_rows = []
+            for _bu in dff['BU'].dropna().unique():
+                _sub = dff[dff['BU'] == _bu]
+                if 'Delivery Status' in _sub.columns:
+                    _sub = _sub[_sub['Delivery Status'].str.strip().str.lower().isin(['completed','shortclose'])]
+                _vals = pd.to_numeric(_sub['OTIF'], errors='coerce').dropna()
+                _vals = _vals[_vals > 0]
+                if len(_vals) > 0:
+                    bu_otif_rows.append({'BU': _bu, 'OTIF%': (_vals <= 1.05).sum() / len(_vals) * 100})
+            bu_otif = pd.DataFrame(bu_otif_rows) if bu_otif_rows else pd.DataFrame(columns=['BU','OTIF%'])
             
             fig5 = go.Figure()
             fig5.add_trace(go.Bar(
@@ -896,8 +866,33 @@ with tab3:
             ))
             fig5.add_hline(y=75, line_dash='dash', line_color=AMBER,
                            annotation_text='75% target', annotation_font_color=AMBER)
-            fig5.update_layout(**DARK, height=280, title_text='OTIF by BU', showlegend=False, yaxis_range=[0,100])
+            fig5.update_layout(**DARK, height=280, title_text='OTIF % by BU (Completed POs only)', showlegend=False, yaxis_range=[0,110])
             st.plotly_chart(fig5, use_container_width=True)
+
+        # OTD chart
+        if 'OTD' in dff.columns:
+            bu_otd_rows = []
+            for _bu in dff['BU'].dropna().unique():
+                _sub = dff[dff['BU'] == _bu]
+                if 'Delivery Status' in _sub.columns:
+                    _sub = _sub[_sub['Delivery Status'].str.strip().str.lower().isin(['completed','shortclose'])]
+                _vals = pd.to_numeric(_sub['OTD'], errors='coerce').dropna()
+                _vals = _vals[_vals > 0]
+                if len(_vals) > 0:
+                    bu_otd_rows.append({'BU': _bu, 'OTD%': (_vals <= 1.0).sum() / len(_vals) * 100})
+            bu_otd = pd.DataFrame(bu_otd_rows) if bu_otd_rows else pd.DataFrame(columns=['BU','OTD%'])
+            if len(bu_otd) > 0:
+                figotd = go.Figure(go.Bar(
+                    x=bu_otd['BU'], y=bu_otd['OTD%'],
+                    marker_color=[GREEN if v >= 75 else RED for v in bu_otd['OTD%']],
+                    marker_line_width=0,
+                    text=bu_otd['OTD%'].apply(lambda x: f'{x:.1f}%'),
+                    textposition='outside', textfont=dict(color='#888', size=10)
+                ))
+                figotd.add_hline(y=75, line_dash='dash', line_color=AMBER,
+                                 annotation_text='75% target', annotation_font_color=AMBER)
+                figotd.update_layout(**DARK, height=260, title_text='OTD % by BU (Completed POs only)', showlegend=False, yaxis_range=[0,110])
+                st.plotly_chart(figotd, use_container_width=True)
 
 # ══════════════════════════════════════════════════════════════
 # TAB 4 — WORKING CAPITAL EFFICIENCY (CREDIT METRIC)
