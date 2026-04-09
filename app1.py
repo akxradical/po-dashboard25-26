@@ -242,20 +242,36 @@ def chat_with_buddy(messages, df):
                 api_messages.append(msg)
     
     try:
+        # Get API key from secrets
+        api_key = ""
+        for key_name in ["ANTHROPIC_API_KEY", "anthropic_api_key", "ANTHROPIC_KEY"]:
+            try:
+                api_key = st.secrets[key_name]
+                break
+            except: pass
+        if not api_key:
+            return "CAT 2 Buddy needs an API key. Please add ANTHROPIC_API_KEY to Streamlit secrets."
+
         resp = requests.post(
             "https://api.anthropic.com/v1/messages",
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01"
+            },
             json={
-                "model": "claude-sonnet-4-20250514",
+                "model": "claude-opus-4-6",
                 "max_tokens": 1000,
                 "messages": api_messages,
             },
             timeout=30
         )
         data = resp.json()
-        if 'content' in data:
+        if 'content' in data and len(data['content']) > 0:
             return data['content'][0]['text']
-        return "Sorry, I couldn't process that. Try again!"
+        elif 'error' in data:
+            return f"API Error: {data['error'].get('message', 'Unknown error')}"
+        return "Sorry, I couldn\'t process that. Try again!"
     except Exception as e:
         return f"Connection error: {str(e)}"
 
@@ -582,12 +598,21 @@ savings_pct = (total_savings / total_spend * 100) if total_spend > 0 else 0
 tat_vals = pd.to_numeric(dff['PR - PO TAT'], errors='coerce')
 avg_tat = tat_vals[tat_vals > 0].mean()
 
-# OTIF
+# OTIF: ratio where <= 1.05 means delivered on time (1.0 = exactly on time)
+# OTD: ratio where <= 1.0 means on time delivery
 otif_pct = 0
+otd_pct = 0
 if 'OTIF' in dff.columns:
     otif_vals = pd.to_numeric(dff['OTIF'], errors='coerce').dropna()
+    otif_vals = otif_vals[otif_vals > 0]
     if len(otif_vals) > 0:
-        otif_pct = otif_vals.mean() * 100
+        otif_pct = (otif_vals <= 1.05).sum() / len(otif_vals) * 100
+
+if 'OTD' in dff.columns:
+    otd_vals = pd.to_numeric(dff['OTD'], errors='coerce').dropna()
+    otd_vals = otd_vals[otd_vals > 0]
+    if len(otd_vals) > 0:
+        otd_pct = (otd_vals <= 1.0).sum() / len(otd_vals) * 100
 
 # New Vendor Development
 nv_pct = 0
@@ -655,7 +680,7 @@ with tab1:
       <div class="kcard kc-{'green' if otif_pct >= 75 else 'red'}">
         <div class="klabel">OTIF</div>
         <div class="kvalue">{otif_pct:.1f}%</div>
-        <div class="ksub">Target: 75%</div>
+        <div class="ksub">OTD: {otd_pct:.1f}% | Target: 75%</div>
         <div class="kdelta {'kup' if otif_pct >= 75 else 'kdown'}">{'✓ On target' if otif_pct >= 75 else '▼ Below target'}</div>
       </div>
       <div class="kcard kc-{'green' if 10 <= nv_pct <= 15 else 'amber'}">
@@ -807,8 +832,7 @@ with tab3:
     with c2:
         st.metric("OTIF", f"{otif_pct:.1f}%", f"{otif_pct-75:.1f}pp vs 75% target")
     with c3:
-        on_time = len(dff[pd.to_numeric(dff['PR - PO TAT'], errors='coerce') <= 90])
-        st.metric("POs within TAT", f"{on_time}/{total_pos}")
+        st.metric("OTD", f"{otd_pct:.1f}%", f"{otd_pct-75:.1f}pp vs 75% target")
     with c4:
         if 'Delivery Status' in dff.columns:
             completed = len(dff[dff['Delivery Status'].str.contains('Completed', case=False, na=False)])
@@ -838,9 +862,11 @@ with tab3:
     
     with c2:
         if 'OTIF' in dff.columns:
-            bu_otif = dff.groupby('BU').apply(
-                lambda x: pd.to_numeric(x['OTIF'], errors='coerce').mean() * 100
-            ).reset_index()
+            def calc_otif_pct(x):
+                vals = pd.to_numeric(x['OTIF'], errors='coerce').dropna()
+                vals = vals[vals > 0]
+                return (vals <= 1.05).sum() / len(vals) * 100 if len(vals) > 0 else 0
+            bu_otif = dff.groupby('BU').apply(calc_otif_pct).reset_index()
             bu_otif.columns = ['BU','OTIF%']
             bu_otif = bu_otif.dropna()
             
