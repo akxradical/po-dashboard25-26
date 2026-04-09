@@ -225,7 +225,7 @@ BU Breakdown:
     ctx += "\nAnswer questions based on this data. Be precise with numbers. Always show ₹ in Crores."
     return ctx
 
-```python
+
 # ── CAT 2 Buddy chatbot ───────────────────────────────────────────────────────
 
 def build_context(df):
