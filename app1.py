@@ -66,55 +66,95 @@ def get_score_for_term(term):
 @st.cache_data(ttl=300)  # Refresh every 5 minutes
 def load_sheet_data():
     try:
+        # Check secrets exist
+        if "gcp_service_account" not in st.secrets:
+            st.error("❌ Missing secret: gcp_service_account. Please add it in Streamlit Cloud → App Settings → Secrets.")
+            return pd.DataFrame()
+
         creds_dict = dict(st.secrets["gcp_service_account"])
         scopes = ["https://spreadsheets.google.com/feeds",
                   "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
         client = gspread.authorize(creds)
-        sh = client.open_by_key("11iDCUUEry2YsokCyvqsp6w8yi295fcX7w-K23BrSHQU")
-        ws = sh.worksheet("PO TRACKER")
-        data = ws.get_all_values()
-        
-        if len(data) < 2:
+
+        SHEET_ID = "11iDCUUEry2YsokCyvqsp6w8yi295fcX7w-K23BrSHQU"
+        sh = client.open_by_key(SHEET_ID)
+
+        # Try multiple possible sheet tab names
+        ws = None
+        for tab_name in ["PO TRACKER", "Sheet1", "PR Tracker"]:
+            try:
+                ws = sh.worksheet(tab_name)
+                break
+            except:
+                continue
+
+        if ws is None:
+            available = [s.title for s in sh.worksheets()]
+            st.error(f"❌ Could not find sheet tab. Available tabs: {available}")
             return pd.DataFrame()
-        
+
+        data = ws.get_all_values()
+
+        if len(data) < 2:
+            st.warning("⚠ Sheet appears empty.")
+            return pd.DataFrame()
+
         headers = data[0]
         rows = data[1:]
         df = pd.DataFrame(rows, columns=headers)
-        
+
         # Clean columns
         df.columns = [c.strip() for c in df.columns]
-        
+
+        # Remove completely empty rows
+        df = df[df.apply(lambda r: any(str(v).strip() for v in r), axis=1)].copy()
+
         # Parse dates
         for col in ['PR Dt.', 'PO Dt.']:
             if col in df.columns:
                 df[col] = pd.to_datetime(df[col], errors='coerce', dayfirst=True)
-        
+
         # Parse numbers
         for col in ['PO Basic Value', 'PO Value with GST', 'PCA Basic Value',
                     'Savings Value', 'PR - PO TAT']:
             if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-        
-        # Filter FY 2025-26
-        df_fy = df[
-            (df['PO Dt.'] >= '2025-04-01') &
-            (df['PO Dt.'] <= '2026-03-31')
-        ].copy()
-        
-        # Add payment score from PAYMENT TERMS column (col X)
-        pt_col = 'PAYMENT TERMS'
-        if pt_col in df_fy.columns:
-            df_fy['Payment Score'] = df_fy[pt_col].apply(get_score_for_term)
-        
+                df[col] = pd.to_numeric(df[col].astype(str).str.replace(',',''), errors='coerce').fillna(0)
+
+        # Filter FY 2025-26 by PO Dt.
+        if 'PO Dt.' in df.columns:
+            df_fy = df[
+                (df['PO Dt.'] >= pd.Timestamp('2025-04-01')) &
+                (df['PO Dt.'] <= pd.Timestamp('2026-03-31'))
+            ].copy()
+        else:
+            df_fy = df.copy()
+
+        # Find payment terms column (check multiple names)
+        pt_col = None
+        for pt_name in ['PAYMENT TERMS', 'PO Payment Terms', 'Payment Terms']:
+            if pt_name in df_fy.columns:
+                pt_col = pt_name
+                break
+
+        if pt_col and pt_col != 'PAYMENT TERMS':
+            df_fy = df_fy.rename(columns={pt_col: 'PAYMENT TERMS'})
+            pt_col = 'PAYMENT TERMS'
+
+        if pt_col:
+            df_fy['Payment Score'] = df_fy['PAYMENT TERMS'].apply(get_score_for_term)
+
         # Month-Year column
-        df_fy['Month'] = df_fy['PO Dt.'].dt.to_period('M')
-        df_fy['Month_str'] = df_fy['PO Dt.'].dt.strftime('%b\'%y')
-        
+        if 'PO Dt.' in df_fy.columns:
+            df_fy['Month'] = df_fy['PO Dt.'].dt.to_period('M')
+            df_fy['Month_str'] = df_fy['PO Dt.'].dt.strftime("%b\'%y")
+
         return df_fy
-        
+
     except Exception as e:
-        st.error(f"Sheet connection error: {e}")
+        import traceback
+        st.error(f"❌ Sheet error: {str(e)}")
+        st.code(traceback.format_exc())
         return pd.DataFrame()
 
 # ── CAT 2 Buddy chatbot ───────────────────────────────────────────────────────
@@ -489,7 +529,19 @@ st.markdown(f"""
 df = df_main.copy() if not df_main.empty else pd.DataFrame()
 
 if df.empty:
-    st.error("Could not load Google Sheet data. Check credentials.")
+    st.markdown("""
+    <div style="background:rgba(229,62,62,0.1);border:1px solid rgba(229,62,62,0.3);
+    border-radius:10px;padding:20px;margin:20px;text-align:center;">
+      <div style="font-size:16px;color:#fc8181;font-weight:700;">⚠ Google Sheet Not Connected</div>
+      <div style="font-size:13px;color:#888;margin-top:8px;">
+        Please ensure:<br><br>
+        1. The <b style="color:#ccc">gcp_service_account</b> secret is added in Streamlit Cloud<br>
+        &nbsp;&nbsp;&nbsp;(App Settings → Secrets)<br><br>
+        2. The service account email has <b style="color:#ccc">Viewer access</b> to the sheet<br><br>
+        3. The sheet has a tab named <b style="color:#ccc">PO TRACKER</b>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
     st.stop()
 
 # ── FILTER ROW ────────────────────────────────────────────────────────────────
