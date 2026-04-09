@@ -225,55 +225,128 @@ BU Breakdown:
     ctx += "\nAnswer questions based on this data. Be precise with numbers. Always show ₹ in Crores."
     return ctx
 
+```python
+# ── CAT 2 Buddy chatbot ───────────────────────────────────────────────────────
+
+def build_context(df):
+    """Build data context string for CAT 2 Buddy"""
+    if df.empty:
+        return "No data available."
+    
+    ctx = f"""You are CAT 2 Buddy, the AI procurement assistant for Zetwerk Central Procurement Team (CAT-2).
+You are helpful, sharp, and professional. Answer questions about procurement data precisely.
+You are CAT 2 Buddy.
+
+=== FY 2025-26 PROCUREMENT DATA SUMMARY ===
+Total POs: {len(df)}
+Total Spend (Basic): ₹{df['PO Basic Value'].sum()/1e7:.2f} Cr
+Total Savings: ₹{df['Savings Value'].sum()/1e7:.2f} Cr
+
+BU Breakdown:
+"""
+    for bu in df['BU'].unique():
+        if bu and str(bu).strip():
+            sub = df[df['BU']==bu]
+            ctx += f"  {bu}: {len(sub)} POs, ₹{sub['PO Basic Value'].sum()/1e7:.2f} Cr spend\n"
+    
+    ctx += "\nPayment Terms Distribution:\n"
+    pt_col = 'PAYMENT TERMS'
+    if pt_col in df.columns:
+        pt_counts = df[pt_col].value_counts().head(10)
+        for term, cnt in pt_counts.items():
+            if term and str(term).strip() not in ['', '0']:
+                val = df[df[pt_col]==term]['PO Basic Value'].sum()
+                ctx += f"  {term}: {cnt} POs (₹{val/1e7:.2f} Cr)\n"
+    
+    ctx += "\nSupplier Types:\n"
+    if 'Supplier type' in df.columns:
+        st_counts = df['Supplier type'].value_counts()
+        for stype, cnt in st_counts.items():
+            if stype:
+                ctx += f"  {stype}: {cnt} POs\n"
+    
+    ctx += "\nMonth-wise PO count:\n"
+    monthly = df.groupby('Month_str').agg(
+        count=('PO Basic Value','count'),
+        spend=('PO Basic Value','sum')
+    ).reset_index()
+    for _, row in monthly.iterrows():
+        ctx += f"  {row['Month_str']}: {int(row['count'])} POs, ₹{row['spend']/1e7:.2f} Cr\n"
+    
+    ctx += "\nCategory breakdown:\n"
+    if 'Category' in df.columns:
+        cat = df.groupby('Category')['PO Basic Value'].sum().sort_values(ascending=False).head(10)
+        for c, v in cat.items():
+            if c:
+                ctx += f"  {c}: ₹{v/1e7:.2f} Cr\n"
+    
+    if 'Payment Score' in df.columns:
+        scored = df[df['Payment Score'].notna()]
+        if len(scored) > 0:
+            ctx += f"\nWorking Capital Efficiency (Credit Metric):\n"
+            ctx += f"  POs with payment terms filled: {len(scored)}\n"
+            monthly_score = scored.groupby('Month_str').apply(
+                lambda x: (x['Payment Score'] * x['PO Basic Value']).sum() / x['PO Basic Value'].sum()
+                if x['PO Basic Value'].sum() > 0 else 0
+            )
+            for m, s in monthly_score.items():
+                ctx += f"  {m}: Score {s:.2f} (Target: 4.5)\n"
+    
+    ctx += "\nAnswer questions based on this data. Be precise with numbers. Always show ₹ in Crores."
+    return ctx
+
+
 def chat_with_buddy(messages, df):
-    """Call Claude API for CAT 2 Buddy responses"""
+    """Call Gemini API for CAT 2 Buddy responses"""
     context = build_context(df)
-    
-    api_messages = [{"role": "user", "content": context + "\n\nUser question: " + messages[0]['content']}]
-    if len(messages) > 1:
-        api_messages = []
-        for i, msg in enumerate(messages):
-            if i == 0:
-                api_messages.append({
-                    "role": "user",
-                    "content": context + "\n\n" + msg['content']
-                })
-            else:
-                api_messages.append(msg)
-    
+
+    # Take latest user message
+    user_query = messages[-1]['content'] if messages else ""
+
+    prompt = context + "\n\nUser question: " + user_query
+
     try:
-        # Get API key from secrets - try all possible key names
+        # Get Gemini API key
         api_key = ""
-        for key_name in ["ANTHROPIC_API_KEY", "anthropic_api_key", "ANTHROPIC_KEY", "api_key"]:
+        for key_name in ["GEMINI_API_KEY", "gemini_api_key", "GOOGLE_API_KEY"]:
             try:
                 api_key = st.secrets[key_name]
-                if api_key: break
-            except: pass
-        if not api_key:
-            return "I'm still warming up — please ask your admin to configure my settings."
+                if api_key:
+                    break
+            except:
+                pass
 
-        resp = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "Content-Type": "application/json",
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01"
-            },
-            json={
-                "model": "claude-opus-4-6",
-                "max_tokens": 1000,
-                "messages": api_messages,
-            },
-            timeout=30
-        )
+        if not api_key:
+            return "⚠️ Gemini API key missing. Please configure it in Streamlit secrets."
+
+        # Gemini API endpoint
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={api_key}"
+
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": prompt}
+                    ]
+                }
+            ]
+        }
+
+        resp = requests.post(url, json=payload, timeout=30)
         data = resp.json()
-        if 'content' in data and len(data['content']) > 0:
-            return data['content'][0]['text']
-        elif 'error' in data:
+
+        # Extract response
+        if "candidates" in data:
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        elif "error" in data:
             return f"API Error: {data['error'].get('message', 'Unknown error')}"
-        return "Sorry, I couldn\'t process that. Try again!"
+        else:
+            return "Sorry, I couldn’t process that. Try again!"
+
     except Exception as e:
         return f"Connection error: {str(e)}"
+
+
 
 # ── SPLASH SCREEN ─────────────────────────────────────────────────────────────
 if 'loaded' not in st.session_state:
