@@ -85,9 +85,14 @@ def load_sheet_data():
                 df[col] = pd.to_datetime(df[col], errors='coerce', dayfirst=True)
 
         # Parse numerics — handle comma-formatted numbers
+        # Find OTD/OTIF regardless of position
         num_cols = ['PO Basic Value', 'PO Value with GST', 'PCA Basic Value',
-                    'Savings Value', 'PR - PO TAT', 'OTD', 'OTIF',
+                    'Savings Value', 'PR - PO TAT',
                     'Actual Delivery TAT (Days)', 'Delivery Time from MFC (Days)']
+        # Also parse OTD and OTIF by finding them case-insensitively
+        for c in df.columns:
+            if c.strip().upper() in ('OTD', 'OTIF') and c not in num_cols:
+                num_cols.append(c)
         for col in num_cols:
             if col in df.columns:
                 df[col] = pd.to_numeric(
@@ -322,8 +327,8 @@ with c3:
     sel_buyer = st.selectbox('Buyer', buyer_opts, key='f_buyer')
 with c4:
     # Supplier type column — try both possible names
-    stype_col = 'Supplier type' if 'Supplier type' in df.columns else (
-                'Supplier Type' if 'Supplier Type' in df.columns else None)
+    # Try all case variants of Supplier Type column
+    stype_col = next((c for c in ['Supplier type', 'Supplier Type', 'SUPPLIER TYPE', 'supplier type'] if c in df.columns), None)
     stype_opts = ['All Types']
     if stype_col:
         stype_opts += sorted([s for s in df[stype_col].dropna().unique() if str(s).strip()])
@@ -353,13 +358,16 @@ if 'Delivery Status' in dff.columns:
     completed_df = dff[dff['Delivery Status'].str.strip().str.lower().isin(['completed', 'shortclose'])]
 
 otif_pct = otd_pct = otif_base = otd_base = 0
-if 'OTD' in dff.columns and len(completed_df) > 0:
-    ov = pd.to_numeric(completed_df['OTD'], errors='coerce').dropna()
+# OTD/OTIF cols — find them regardless of case
+otd_col_name  = next((c for c in dff.columns if c.strip().upper() == 'OTD'),  None)
+otif_col_name = next((c for c in dff.columns if c.strip().upper() == 'OTIF'), None)
+if otd_col_name and len(completed_df) > 0:
+    ov = pd.to_numeric(completed_df[otd_col_name].astype(str).str.replace(',',''), errors='coerce').dropna()
     ov = ov[ov > 0]
     otd_base = len(ov)
     if otd_base > 0: otd_pct = (ov <= 1.0).sum() / otd_base * 100
-if 'OTIF' in dff.columns and len(completed_df) > 0:
-    ov2 = pd.to_numeric(completed_df['OTIF'], errors='coerce').dropna()
+if otif_col_name and len(completed_df) > 0:
+    ov2 = pd.to_numeric(completed_df[otif_col_name].astype(str).str.replace(',',''), errors='coerce').dropna()
     ov2 = ov2[ov2 > 0]
     otif_base = len(ov2)
     if otif_base > 0: otif_pct = (ov2 <= 1.05).sum() / otif_base * 100
@@ -535,12 +543,12 @@ with tab3:
                 fig4.update_layout(**DARK,height=280,title_text='Avg PR-PO TAT by BU',showlegend=False)
                 st.plotly_chart(fig4,use_container_width=True)
     with c2:
-        if 'OTIF' in dff.columns and len(completed_df)>0:
+        if otif_col_name and len(completed_df)>0:
             rows2=[]
             for _bu in dff['BU'].dropna().unique():
                 _sub=completed_df[completed_df['BU']==_bu] if 'BU' in completed_df.columns else pd.DataFrame()
                 if len(_sub)==0: continue
-                _v=pd.to_numeric(_sub['OTIF'],errors='coerce').dropna()
+                _v=pd.to_numeric(_sub[otif_col_name].astype(str).str.replace(',',''),errors='coerce').dropna()
                 _v=_v[_v>0]
                 if len(_v)>0: rows2.append({'BU':_bu,'OTIF%':(_v<=1.05).sum()/len(_v)*100})
             if rows2:
@@ -555,12 +563,12 @@ with tab3:
             st.info("OTIF data will appear once POs are marked Completed.")
 
     # OTD chart
-    if 'OTD' in dff.columns and len(completed_df)>0:
+    if otd_col_name and len(completed_df)>0:
         rows3=[]
         for _bu in dff['BU'].dropna().unique():
             _sub=completed_df[completed_df['BU']==_bu] if 'BU' in completed_df.columns else pd.DataFrame()
             if len(_sub)==0: continue
-            _v=pd.to_numeric(_sub['OTD'],errors='coerce').dropna()
+            _v=pd.to_numeric(_sub[otd_col_name].astype(str).str.replace(',',''),errors='coerce').dropna()
             _v=_v[_v>0]
             if len(_v)>0: rows3.append({'BU':_bu,'OTD%':(_v<=1.0).sum()/len(_v)*100})
         if rows3:
