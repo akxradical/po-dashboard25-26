@@ -824,14 +824,20 @@ with tab5:
 # ════════════════════════════════════════════════
 with tab6:
     st.markdown("### MFC Delivery Tracker")
+    # Use FULL unfiltered sheet data — same as email alert, no FY/BU filter
+    mfc_full = df_main.copy()
+    # Re-parse numeric columns that may not have been parsed
+    for _col in mfc_full.columns:
+        if _col.strip().upper() in ('OTD','OTIF'):
+            mfc_full[_col] = pd.to_numeric(mfc_full[_col].astype(str).str.replace('%','').str.replace(',',''), errors='coerce')
     today = pd.Timestamp(date.today())
-    mc = next((c for c in ["MFC Dt.","MFC Date"] if c in dff.columns), None)
-    dc = next((c for c in ["Delivery Time from MFC (Days)","Delivery Time from MFC"] if c in dff.columns), None)
+    mc = next((c for c in ["MFC Dt.","MFC Date"] if c in mfc_full.columns), None)
+    dc = next((c for c in ["Delivery Time from MFC (Days)","Delivery Time from MFC"] if c in mfc_full.columns), None)
     if not mc or not dc:
         st.warning("MFC Dt. or Delivery Time from MFC columns not found.")
     else:
-        # Only ongoing
-        mfc_src = dff.copy()
+        # Only ongoing — exclude completed/shortclose, same logic as email
+        mfc_src = mfc_full.copy()
         if 'Delivery Status' in mfc_src.columns:
             mfc_src = mfc_src[~mfc_src['Delivery Status'].str.strip().str.lower().isin(['completed','shortclose'])]
         keep = [c for c in ["SN","BU","Project Name","Items","Category","Supplier Name","PO/ OD Ref.","PO Dt.",mc,dc,"Delivery Status","Current Status"] if c in mfc_src.columns]
@@ -854,10 +860,10 @@ with tab6:
             cnt = mf["Alert"].value_counts()
             st.markdown(f"""
 <div class="kGrid k4" style="padding:12px 0 0;">
-{kcard(str(cnt.get("GREEN",0)), "On Track", "More than 30 days left", "", "", "kGreen")}
-{kcard(str(cnt.get("AMBER",0)), "Amber Alert", "30 days or less", "", "", "kAmber")}
-{kcard(str(cnt.get("RED",0)), "Red Alert", "1/3 days or less", "", "", "kRed")}
-{kcard(str(cnt.get("OVERDUE",0)), "Overdue", "Past expected date", "", "", "kPurple")}
+{kcard(str(cnt.get("GREEN",0)), "On Track", "", "", "", "kGreen")}
+{kcard(str(cnt.get("AMBER",0)), "Amber Alert", "", "", "", "kAmber")}
+{kcard(str(cnt.get("RED",0)), "Red Alert", "", "", "", "kRed")}
+{kcard(str(cnt.get("OVERDUE",0)), "Overdue", "", "", "", "kPurple")}
 </div>""", unsafe_allow_html=True)
             red = mf[mf["Alert"].isin(["RED","OVERDUE"])]
             if not red.empty:
