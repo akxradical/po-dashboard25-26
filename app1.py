@@ -10,6 +10,7 @@ import time
 from datetime import datetime, date, timedelta
 from google.oauth2.service_account import Credentials
 import gspread
+import streamlit.components.v1 as components
 
 st.set_page_config(
     page_title="Zetwerk CPT Dashboard",
@@ -500,7 +501,7 @@ border-radius:12px;padding:24px;margin:24px;text-align:center;">
     st.stop()
 
 # ── FILTERS TOP ROW ─────────────────────────────────────────────
-c1, c2, c3, c4 = st.columns(4)
+c1, c2, c3, c4, c5 = st.columns([1,1,1,1,0.4])
 with c1:
     sel_bu = st.selectbox('BU',
         ['All BU'] + sorted([b for b in df['BU'].dropna().unique() if b]), key='f_bu')
@@ -517,6 +518,14 @@ with c4:
     so = ['All Types']
     if stcol: so += sorted([s for s in df[stcol].dropna().unique() if str(s).strip()])
     sel_stype = st.selectbox('Supplier Type', so, key='f_stype')
+with c5:
+    st.markdown("<div style='padding-top:22px;'>", unsafe_allow_html=True)
+    if st.button("Refresh", help="Reload data from Google Sheets"):
+        st.cache_data.clear()
+        st.session_state.pop('df', None)
+        st.session_state.pop('loaded', None)
+        st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
 
 dff = df.copy()
 if sel_bu != 'All BU': dff = dff[dff['BU'] == sel_bu]
@@ -916,8 +925,76 @@ if 'buddy_ask' in st.session_state and st.session_state.buddy_ask:
 
 buddy_visible = "flex" if st.session_state.buddy_open else "none"
 
-st.markdown(f"""
-<div id="buddyPanel" style="display:{buddy_visible};">
+# Build buddy HTML with proper JS execution via components.html
+buddy_html_full = f"""<!DOCTYPE html>
+<html>
+<head>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box;font-family:'DM Sans',Arial,sans-serif;}}
+body{{background:transparent;overflow:hidden;}}
+#buddyFab{{
+  position:fixed;bottom:20px;right:20px;z-index:9999;
+  width:52px;height:52px;border-radius:50%;
+  background:linear-gradient(135deg,#e53e3e,#fc4f4f);
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;box-shadow:0 4px 20px rgba(229,62,62,0.5);
+  font-size:22px;border:none;color:white;
+  transition:transform 0.2s;
+}}
+#buddyFab:hover{{transform:scale(1.1);}}
+#buddyPanel{{
+  position:fixed;bottom:82px;right:20px;z-index:9998;
+  width:340px;background:#13131a;
+  border:1px solid rgba(229,62,62,0.3);border-radius:16px;
+  box-shadow:0 8px 32px rgba(0,0,0,0.8);
+  display:none;flex-direction:column;overflow:hidden;
+}}
+#buddyHeader{{
+  background:linear-gradient(135deg,#1a0505,#220808);
+  border-bottom:1px solid rgba(229,62,62,0.2);
+  padding:12px 16px;display:flex;align-items:center;gap:10px;
+}}
+#buddyAvatar{{
+  width:34px;height:34px;background:linear-gradient(135deg,#e53e3e,#fc4f4f);
+  border-radius:9px;display:flex;align-items:center;justify-content:center;
+  font-size:16px;font-weight:900;color:white;flex-shrink:0;
+}}
+#buddyName{{font-size:13px;font-weight:700;color:#fff;}}
+#buddyStatus{{font-size:10px;color:#38a169;}}
+#buddyMsgs{{
+  padding:12px;display:flex;flex-direction:column;
+  height:260px;overflow-y:auto;gap:6px;
+}}
+.bmUser{{
+  background:rgba(229,62,62,0.12);border:1px solid rgba(229,62,62,0.2);
+  border-radius:10px 10px 2px 10px;padding:8px 12px;
+  font-size:12px;color:#eee;max-width:85%;align-self:flex-end;margin-left:auto;
+}}
+.bmBot{{
+  background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.09);
+  border-radius:10px 10px 10px 2px;padding:8px 12px;
+  font-size:12px;color:#ccc;max-width:90%;
+}}
+#buddyInputRow{{
+  padding:8px 12px;border-top:1px solid rgba(255,255,255,0.06);
+  display:flex;gap:6px;
+}}
+#buddyInput{{
+  flex:1;background:rgba(255,255,255,0.06);
+  border:1px solid rgba(255,255,255,0.1);border-radius:8px;
+  padding:8px 10px;color:#fff;font-size:12px;outline:none;
+}}
+#buddyInput:focus{{border-color:rgba(229,62,62,0.4);}}
+#buddySend{{
+  background:#e53e3e;border:none;border-radius:8px;
+  padding:8px 14px;color:white;font-size:12px;
+  cursor:pointer;font-weight:600;
+}}
+#buddySend:hover{{background:#c53030;}}
+</style>
+</head>
+<body>
+<div id="buddyPanel">
   <div id="buddyHeader">
     <div id="buddyAvatar">C</div>
     <div>
@@ -927,44 +1004,43 @@ st.markdown(f"""
   </div>
   <div id="buddyMsgs">{chat_html}</div>
   <div id="buddyInputRow">
-    <input id="buddyInput" type="text" placeholder="Ask about your procurement data..." />
+    <input id="buddyInput" type="text" placeholder="Ask anything about your data..." />
     <button id="buddySend">Send</button>
   </div>
 </div>
 <button id="buddyFab">&#128172;</button>
 <script>
-(function() {{
-  // Use addEventListener — inline onclick blocked in Streamlit sandbox
-  var fab = document.getElementById('buddyFab');
-  var panel = document.getElementById('buddyPanel');
-  var sendBtn = document.getElementById('buddySend');
-  var inp = document.getElementById('buddyInput');
-  var msgs = document.getElementById('buddyMsgs');
+var panel = document.getElementById('buddyPanel');
+var fab   = document.getElementById('buddyFab');
+var inp   = document.getElementById('buddyInput');
+var send  = document.getElementById('buddySend');
+var msgs  = document.getElementById('buddyMsgs');
 
-  if (msgs) msgs.scrollTop = msgs.scrollHeight;
+// Open by default if was open
+{'panel.style.display="flex";' if st.session_state.buddy_open else ''}
+if (msgs) msgs.scrollTop = msgs.scrollHeight;
 
-  if (fab) {{
-    fab.addEventListener('click', function() {{
-      var isOpen = panel.style.display === 'flex';
-      panel.style.display = isOpen ? 'none' : 'flex';
-      fab.innerHTML = isOpen ? '&#128172;' : '&#10005;';
-      if (!isOpen && msgs) setTimeout(function(){{ msgs.scrollTop = msgs.scrollHeight; }}, 50);
-    }});
-  }}
+fab.addEventListener('click', function() {{
+  var open = panel.style.display === 'flex';
+  panel.style.display = open ? 'none' : 'flex';
+  fab.innerHTML = open ? '&#128172;' : '&#10005;';
+  if (!open && msgs) setTimeout(function(){{msgs.scrollTop=msgs.scrollHeight;}},50);
+}});
 
-  function sendMsg() {{
-    if (!inp) return;
-    var val = inp.value.trim();
-    if (!val) return;
-    inp.value = '';
-    window.location.href = window.location.pathname + '?buddy_msg=' + encodeURIComponent(val);
-  }}
-
-  if (sendBtn) sendBtn.addEventListener('click', sendMsg);
-  if (inp) inp.addEventListener('keydown', function(e) {{ if (e.key === 'Enter') sendMsg(); }});
-}})();
+function doSend() {{
+  var val = inp.value.trim();
+  if (!val) return;
+  inp.value = '';
+  // Navigate parent window with query param
+  window.parent.location.href = window.parent.location.pathname + '?buddy_msg=' + encodeURIComponent(val);
+}}
+send.addEventListener('click', doSend);
+inp.addEventListener('keydown', function(e){{ if(e.key==='Enter') doSend(); }});
 </script>
-""", unsafe_allow_html=True)
+</body>
+</html>"""
+
+components.html(buddy_html_full, height=420, scrolling=False)
 
 # Handle buddy message from URL query param
 buddy_msg = st.query_params.get("buddy_msg", "")
