@@ -362,15 +362,17 @@ otif_pct = otd_pct = otif_base = otd_base = 0
 otd_col_name  = next((c for c in dff.columns if c.strip().upper() == 'OTD'),  None)
 otif_col_name = next((c for c in dff.columns if c.strip().upper() == 'OTIF'), None)
 if otd_col_name and len(completed_df) > 0:
-    ov = pd.to_numeric(completed_df[otd_col_name].astype(str).str.replace(',',''), errors='coerce').dropna()
+    # Values stored as percentages e.g. "123.33%" or "100.00%" — strip % and compare <= 100
+    ov = pd.to_numeric(completed_df[otd_col_name].astype(str).str.replace('%','').str.replace(',',''), errors='coerce').dropna()
     ov = ov[ov > 0]
     otd_base = len(ov)
-    if otd_base > 0: otd_pct = (ov <= 1.0).sum() / otd_base * 100
+    if otd_base > 0: otd_pct = (ov <= 100.0).sum() / otd_base * 100
 if otif_col_name and len(completed_df) > 0:
-    ov2 = pd.to_numeric(completed_df[otif_col_name].astype(str).str.replace(',',''), errors='coerce').dropna()
+    # Values stored as percentages e.g. "100.00%" — strip % and compare <= 105
+    ov2 = pd.to_numeric(completed_df[otif_col_name].astype(str).str.replace('%','').str.replace(',',''), errors='coerce').dropna()
     ov2 = ov2[ov2 > 0]
     otif_base = len(ov2)
-    if otif_base > 0: otif_pct = (ov2 <= 1.05).sum() / otif_base * 100
+    if otif_base > 0: otif_pct = (ov2 <= 105.0).sum() / otif_base * 100
 
 nv_pct = nv_count = 0
 if stype_col and stype_col in dff.columns:
@@ -548,9 +550,9 @@ with tab3:
             for _bu in dff['BU'].dropna().unique():
                 _sub=completed_df[completed_df['BU']==_bu] if 'BU' in completed_df.columns else pd.DataFrame()
                 if len(_sub)==0: continue
-                _v=pd.to_numeric(_sub[otif_col_name].astype(str).str.replace(',',''),errors='coerce').dropna()
+                _v=pd.to_numeric(_sub[otif_col_name].astype(str).str.replace('%','').str.replace(',',''),errors='coerce').dropna()
                 _v=_v[_v>0]
-                if len(_v)>0: rows2.append({'BU':_bu,'OTIF%':(_v<=1.05).sum()/len(_v)*100})
+                if len(_v)>0: rows2.append({'BU':_bu,'OTIF%':(_v<=105.0).sum()/len(_v)*100})
             if rows2:
                 bo=pd.DataFrame(rows2)
                 fig5=go.Figure(go.Bar(x=bo['BU'],y=bo['OTIF%'],
@@ -568,9 +570,9 @@ with tab3:
         for _bu in dff['BU'].dropna().unique():
             _sub=completed_df[completed_df['BU']==_bu] if 'BU' in completed_df.columns else pd.DataFrame()
             if len(_sub)==0: continue
-            _v=pd.to_numeric(_sub[otd_col_name].astype(str).str.replace(',',''),errors='coerce').dropna()
+            _v=pd.to_numeric(_sub[otd_col_name].astype(str).str.replace('%','').str.replace(',',''),errors='coerce').dropna()
             _v=_v[_v>0]
-            if len(_v)>0: rows3.append({'BU':_bu,'OTD%':(_v<=1.0).sum()/len(_v)*100})
+            if len(_v)>0: rows3.append({'BU':_bu,'OTD%':(_v<=100.0).sum()/len(_v)*100})
         if rows3:
             bo2=pd.DataFrame(rows3)
             figotd=go.Figure(go.Bar(x=bo2['BU'],y=bo2['OTD%'],
@@ -679,7 +681,11 @@ with tab6:
         keep=[c for c in ["SN","BU","Project Name","Items","Category","Handled by",
               "Supplier Name","PO/ OD Ref.","PO Dt.",mfc_col,days_col,
               "Delivery Status","Current Status"] if c in dff.columns]
-        mf=dff[keep].copy()
+        # MFC Tracker: only Ongoing POs (not completed/shortclose)
+        mfc_source = dff.copy()
+        if 'Delivery Status' in mfc_source.columns:
+            mfc_source = mfc_source[~mfc_source['Delivery Status'].str.strip().str.lower().isin(['completed','shortclose'])]
+        mf=mfc_source[keep].copy()
         mf[mfc_col]=pd.to_datetime(mf[mfc_col],dayfirst=True,errors='coerce')
         mf[days_col]=pd.to_numeric(mf[days_col],errors='coerce')
         mf=mf.dropna(subset=[mfc_col,days_col]); mf=mf[mf[days_col]>0]
