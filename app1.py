@@ -82,7 +82,7 @@ def load_sheet_data():
                 df[col] = pd.to_numeric(df[col].astype(str).str.replace('%','').str.replace(',',''), errors='coerce')
         if 'PO Dt.' in df.columns:
             df = df[(df['PO Dt.'] >= pd.Timestamp('2025-04-01')) &
-                    (df['PO Dt.'] <= pd.Timestamp('2026-03-31'))].copy()
+                    (df['PO Dt.'] <= pd.Timestamp('2026-03-31'))].copy()  # Full FY Apr25-Mar26
         for pt in ['PAYMENT TERMS', 'PO Payment Terms', 'Payment Terms']:
             if pt in df.columns:
                 if pt != 'PAYMENT TERMS': df = df.rename(columns={pt: 'PAYMENT TERMS'})
@@ -173,15 +173,25 @@ st.markdown("""
 *, html, body { font-family: 'DM Sans', sans-serif !important; box-sizing: border-box; }
 html, body { font-size: 16px !important; }
 
-/* ── Streamlit container overrides ── */
-[data-testid="stAppViewContainer"] { background: #0d0d1a !important; }
-[data-testid="stMainBlockContainer"] { padding: 0 !important; max-width: 100% !important; }
-[data-testid="stAppViewBlockContainer"] { max-width: 100% !important; padding: 0 !important; }
-section.main > div { max-width: 100% !important; padding-left: 0 !important; padding-right: 0 !important; }
+/* ── FORCE FULL WIDTH — override ALL Streamlit max-width constraints ── */
+[data-testid="stAppViewContainer"],
+[data-testid="stAppViewBlockContainer"],
+[data-testid="stMainBlockContainer"],
+[data-testid="stVerticalBlockBorderWrapper"],
+section[data-testid="stMain"],
+section[data-testid="stMain"] > div,
+.main .block-container,
+.block-container,
+div[data-layout="wide"] {
+    max-width: 100% !important;
+    width: 100% !important;
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+}
+[data-testid="stAppViewContainer"] { background: #0d0d1a !important; padding: 0 !important; }
+[data-testid="stMainBlockContainer"] { padding: 0 !important; }
 [data-testid="stSidebar"] { display: none !important; }
 [data-testid="stHorizontalBlock"] { gap: 12px !important; }
-/* Remove default Streamlit padding */
-.block-container { padding: 0 !important; max-width: 100% !important; }
 
 /* ── Nav bar ── */
 .zNav {
@@ -813,8 +823,7 @@ with tab5:
 # TAB 6 — MFC TRACKER (Ongoing only)
 # ════════════════════════════════════════════════
 with tab6:
-    st.markdown("### MFC Delivery Tracker — Ongoing POs only")
-    st.caption("GREEN = more than 30 days | AMBER = 30 days or less | RED = 1/3 of delivery days or less | OVERDUE = past expected date")
+    st.markdown("### MFC Delivery Tracker")
     today = pd.Timestamp(date.today())
     mc = next((c for c in ["MFC Dt.","MFC Date"] if c in dff.columns), None)
     dc = next((c for c in ["Delivery Time from MFC (Days)","Delivery Time from MFC"] if c in dff.columns), None)
@@ -866,7 +875,8 @@ with tab6:
                      "AMBER":"background-color:#1a1000;color:#ffcc66;font-size:13px",
                      "GREEN":"background-color:#001a00;color:#66cc66;font-size:13px"}.get(row["Alert"],"")
                 return [s]*len(row)
-            st.dataframe(ds.style.apply(hl,axis=1), use_container_width=True, height=500)
+            st.markdown(f'**{len(disp)} POs shown**', unsafe_allow_html=False)
+            st.dataframe(ds.style.apply(hl,axis=1), use_container_width=True, height=min(40*len(disp)+50, 800))
 
 # ── FOOTER ───────────────────────────────────────────────────────
 st.markdown(f"""
@@ -916,38 +926,26 @@ st.markdown(f"""
     <button id="buddySend" onclick="sendMsg()">Send</button>
   </div>
 </div>
-<div id="buddyFab" onclick="toggleBuddy()">💬</div>
-
+<button id="buddyFab" onclick="
+  var p=document.getElementById('buddyPanel');
+  var isOpen=p.style.display==='flex';
+  p.style.display=isOpen?'none':'flex';
+  this.innerHTML=isOpen?'&#128172;':'&#10005;';
+  if(!isOpen){{var m=document.getElementById('buddyMsgs');if(m)m.scrollTop=m.scrollHeight;}}
+">💬</button>
 <script>
-function toggleBuddy(){{
-  const panel = document.getElementById('buddyPanel');
-  const fab = document.getElementById('buddyFab');
-  const isOpen = panel.style.display === 'flex';
-  panel.style.display = isOpen ? 'none' : 'flex';
-  fab.textContent = isOpen ? '💬' : '✕';
-  if(!isOpen){{
-    setTimeout(()=>{{
-      const msgs = document.getElementById('buddyMsgs');
-      if(msgs) msgs.scrollTop = msgs.scrollHeight;
-    }},100);
-  }}
-}}
 function sendMsg(){{
-  const inp = document.getElementById('buddyInput');
-  const val = inp.value.trim();
-  if(!val) return;
-  inp.value = '';
-  // Store in sessionStorage and trigger Streamlit rerun via query param
-  window.parent.postMessage({{type:'streamlit:setComponentValue', value:val}}, '*');
-  // Fallback: use URL hash to communicate
-  const encoded = encodeURIComponent(val);
-  window.location.href = window.location.pathname + '?buddy_msg=' + encoded;
+  var inp=document.getElementById('buddyInput');
+  var val=inp.value.trim();
+  if(!val)return;
+  inp.value='';
+  var enc=encodeURIComponent(val);
+  window.location.href=window.location.pathname+'?buddy_msg='+enc;
 }}
-// Auto-scroll on load
-window.addEventListener('load', ()=>{{
-  const msgs = document.getElementById('buddyMsgs');
-  if(msgs) msgs.scrollTop = msgs.scrollHeight;
-}});
+(function(){{
+  var m=document.getElementById('buddyMsgs');
+  if(m)m.scrollTop=m.scrollHeight;
+}})();
 </script>
 """, unsafe_allow_html=True)
 
