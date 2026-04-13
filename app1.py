@@ -225,9 +225,12 @@ else:
 
 # ── Global CSS ────────────────────────────────────────────────
 st.markdown("""
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
 *,html,body{font-family:'DM Sans',sans-serif!important;}
+html{font-size:16px!important;}
+[data-testid="stAppViewContainer"]{min-width:0!important;width:100%!important;}
 [data-testid="stAppViewBlockContainer"],[data-testid="stMain"]{background:#0e0e12!important;padding:0!important;max-width:100%!important;}
 [data-testid="stSidebar"]{display:none!important;}
 [data-testid="stMainBlockContainer"]{padding:0!important;max-width:100%!important;}
@@ -258,8 +261,8 @@ st.markdown("""
 .kc-purple::before{background:linear-gradient(90deg,#805ad5,#b794f4);}
 .kc-teal::before{background:linear-gradient(90deg,#2c7a7b,#4fd1c5);}
 .klabel{font-size:10px;color:#555;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;}
-.kvalue{font-size:26px;font-weight:700;color:#fff;line-height:1.1;margin:4px 0 2px;
-    letter-spacing:-0.03em;font-family:'DM Mono',monospace;}
+.kvalue{font-size:28px;font-weight:800;color:#fff;line-height:1.1;margin:4px 0 2px;
+    letter-spacing:-0.02em;font-family:'DM Mono',monospace;}
 .ksub{font-size:10px;color:#444;}
 .kdelta{font-size:11px;font-weight:600;margin-top:5px;}
 .kup{color:#68d391;}.kdown{color:#fc8181;}.kwarn{color:#f6e05e;}
@@ -742,68 +745,101 @@ if 'buddy_msgs' not in st.session_state:
     st.session_state.buddy_msgs = [{"role":"assistant",
         "content":"Hi! I'm CAT 2 Buddy.\nAsk me anything about your procurement data."}]
 
+
+
+# ── CAT 2 BUDDY — STREAMLIT SIDEBAR (rendered as floating via CSS) ─────
 st.markdown("""
 <style>
-[data-testid="stSidebar"]{
-    display:block!important;background:#0e0e12!important;
-    border-left:1px solid rgba(255,255,255,0.07)!important;
-    min-width:300px!important;max-width:300px!important;
-}
-section[data-testid="stSidebar"]{right:0!important;left:auto!important;}
-[data-testid="stSidebar"] .stButton button{
-    background:rgba(255,255,255,0.04)!important;border:1px solid rgba(255,255,255,0.08)!important;
-    color:#888!important;font-size:11px!important;border-radius:6px!important;}
-[data-testid="stSidebar"] .stButton button:hover{
-    background:rgba(229,62,62,0.1)!important;border-color:rgba(229,62,62,0.3)!important;color:#fc8181!important;}
-[data-testid="stSidebar"] .stTextInput input{
-    background:#13131a!important;border:1px solid rgba(255,255,255,0.1)!important;
-    color:#fff!important;font-size:12px!important;border-radius:8px!important;}
-[data-testid="stSidebar"] h3{color:#fff!important;font-size:15px!important;}
-[data-testid="stSidebarContent"]{padding-top:16px!important;}
+[data-testid="stSidebar"]{display:none!important;}
 </style>
 """, unsafe_allow_html=True)
 
-with st.sidebar:
-    st.markdown("""
-<div style="background:linear-gradient(135deg,#1a0f0f,#200808);border-bottom:1px solid rgba(229,62,62,0.2);
-padding:12px 4px;margin:-16px -16px 12px;display:flex;align-items:center;gap:10px;">
-  <div style="width:36px;height:36px;background:linear-gradient(135deg,#e53e3e,#fc4f4f);border-radius:10px;
-  display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:900;color:white;flex-shrink:0;">C</div>
-  <div>
-    <div style="font-size:13px;font-weight:700;color:#fff;">CAT 2 Buddy</div>
-    <div style="font-size:10px;color:#38a169;">Online &middot; Powered by Claude</div>
+# Build chat HTML for the floating panel
+chat_html = ""
+for msg in st.session_state.buddy_msgs[-10:]:
+    if msg['role'] == 'user':
+        chat_html += f'<div style="background:rgba(229,62,62,0.15);border:1px solid rgba(229,62,62,0.25);border-radius:10px 10px 2px 10px;padding:8px 12px;margin:6px 0;font-size:13px;color:#eee;max-width:85%;align-self:flex-end;margin-left:auto;">{msg["content"]}</div>'
+    else:
+        chat_html += f'<div style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:10px 10px 10px 2px;padding:8px 12px;margin:6px 0;font-size:13px;color:#ccc;max-width:90%;">{msg["content"]}</div>'
+
+buddy_open = st.session_state.get('buddy_open', False)
+panel_display = 'flex' if buddy_open else 'none'
+
+st.markdown(f"""
+<style>
+.buddy-fab {{
+    position:fixed;bottom:28px;right:28px;z-index:9999;
+    width:56px;height:56px;border-radius:50%;
+    background:linear-gradient(135deg,#e53e3e,#fc4f4f);
+    display:flex;align-items:center;justify-content:center;
+    cursor:pointer;box-shadow:0 4px 24px rgba(229,62,62,0.5);
+    font-size:22px;font-weight:900;color:white;
+    border:none;transition:transform 0.2s;user-select:none;
+}}
+.buddy-fab:hover{{transform:scale(1.1);}}
+.buddy-panel {{
+    position:fixed;bottom:96px;right:28px;z-index:9998;
+    width:360px;background:#13131a;
+    border:1px solid rgba(229,62,62,0.3);border-radius:16px;
+    box-shadow:0 8px 40px rgba(0,0,0,0.7);
+    flex-direction:column;overflow:hidden;
+    display:{panel_display};
+}}
+.buddy-panel-header {{
+    background:linear-gradient(135deg,#1a0505,#250808);
+    border-bottom:1px solid rgba(229,62,62,0.2);
+    padding:12px 16px;display:flex;align-items:center;gap:10px;
+}}
+.buddy-msgs {{
+    padding:12px;display:flex;flex-direction:column;
+    height:280px;overflow-y:auto;gap:4px;
+}}
+</style>
+<div class="buddy-panel">
+  <div class="buddy-panel-header">
+    <div style="width:34px;height:34px;background:linear-gradient(135deg,#e53e3e,#fc4f4f);border-radius:9px;
+    display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:900;color:white;flex-shrink:0;">C</div>
+    <div>
+      <div style="font-size:13px;font-weight:700;color:#fff;">CAT 2 Buddy</div>
+      <div style="font-size:10px;color:#38a169;">Online &middot; Powered by Claude</div>
+    </div>
   </div>
-</div>""", unsafe_allow_html=True)
+  <div class="buddy-msgs">{chat_html}</div>
+</div>
+<div class="buddy-fab" onclick="
+  const panel = document.querySelector('.buddy-panel');
+  const isOpen = panel.style.display === 'flex';
+  panel.style.display = isOpen ? 'none' : 'flex';
+  this.textContent = isOpen ? 'C' : 'X';
+">C</div>
+""", unsafe_allow_html=True)
 
-    # Chat history
-    for msg in st.session_state.buddy_msgs[-8:]:
-        if msg['role']=='user':
-            st.markdown(f'<div style="background:rgba(229,62,62,0.1);border:1px solid rgba(229,62,62,0.2);border-radius:10px;padding:8px 12px;margin:4px 0;font-size:12px;color:#eee;">{msg["content"]}</div>',unsafe_allow_html=True)
-        else:
-            st.markdown(f'<div style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:8px 12px;margin:4px 0;font-size:12px;color:#ccc;">{msg["content"]}</div>',unsafe_allow_html=True)
+# Quick questions as real Streamlit buttons (hidden until panel open via JS)
+st.markdown('<div style="position:fixed;bottom:96px;right:28px;z-index:9997;width:360px;" id="buddy-controls">', unsafe_allow_html=True)
+for q in ["Total spend by BU?","Best savings BU?","Working capital score?",
+          "New vendor %?","VFS payment POs?","Avg TAT this FY?"]:
+    if st.button(q, key=f"qq_{q}"):
+        st.session_state.buddy_msgs.append({"role":"user","content":q})
+        st.session_state['buddy_open'] = True
+        with st.spinner("Thinking..."):
+            reply = chat_with_buddy(q, dff)
+        st.session_state.buddy_msgs.append({"role":"assistant","content":reply})
+        st.rerun()
 
-    st.markdown("---")
-    st.markdown("<div style='font-size:11px;color:#555;font-weight:600;margin-bottom:6px;'>QUICK QUESTIONS</div>",unsafe_allow_html=True)
-    for q in ["Total spend by BU?","Best savings BU?","Working capital score?",
-              "New vendor %?","VFS payment POs?","Avg TAT this FY?"]:
-        if st.button(q,key=f"qq_{q}",use_container_width=True):
-            st.session_state.buddy_msgs.append({"role":"user","content":q})
-            with st.spinner("Thinking..."):
-                reply=chat_with_buddy(q,dff)
-            st.session_state.buddy_msgs.append({"role":"assistant","content":reply})
-            st.rerun()
-
-    st.markdown("---")
-    user_input=st.text_input("Ask anything:",placeholder="e.g. How many IFC 90 POs?",key="buddy_input")
-    ca,cb=st.columns(2)
-    with ca:
-        if st.button("Ask",type="primary",use_container_width=True) and user_input.strip():
+col_inp, col_ask, col_clr = st.columns([4,1,1])
+with col_inp:
+    user_input = st.text_input("", placeholder="Ask CAT 2 Buddy...", key="buddy_input", label_visibility="collapsed")
+with col_ask:
+    if st.button("Ask", type="primary"):
+        if user_input.strip():
             st.session_state.buddy_msgs.append({"role":"user","content":user_input})
-            with st.spinner("Thinking..."):
-                reply=chat_with_buddy(user_input,dff)
+            st.session_state['buddy_open'] = True
+            with st.spinner(""):
+                reply = chat_with_buddy(user_input, dff)
             st.session_state.buddy_msgs.append({"role":"assistant","content":reply})
             st.rerun()
-    with cb:
-        if st.button("Clear",use_container_width=True):
-            st.session_state.buddy_msgs=[{"role":"assistant","content":"Hi! I'm CAT 2 Buddy. Ask me anything about your procurement data!"}]
-            st.rerun()
+with col_clr:
+    if st.button("Clear"):
+        st.session_state.buddy_msgs = [{"role":"assistant","content":"Hi! I'm CAT 2 Buddy. Ask me anything about your data!"}]
+        st.rerun()
+st.markdown('</div>', unsafe_allow_html=True)
