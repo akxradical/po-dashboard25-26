@@ -925,32 +925,43 @@ st.markdown(f"""
       <div id="buddyStatus">Online</div>
     </div>
   </div>
-  <div id="buddyMsgs" id="msgScroll">{chat_html}</div>
+  <div id="buddyMsgs">{chat_html}</div>
   <div id="buddyInputRow">
-    <input id="buddyInput" type="text" placeholder="Ask about your procurement data..." 
-      onkeydown="if(event.key==='Enter'){{sendMsg()}}"/>
-    <button id="buddySend" onclick="sendMsg()">Send</button>
+    <input id="buddyInput" type="text" placeholder="Ask about your procurement data..." />
+    <button id="buddySend">Send</button>
   </div>
 </div>
-<button id="buddyFab" onclick="
-  var p=document.getElementById('buddyPanel');
-  var isOpen=p.style.display==='flex';
-  p.style.display=isOpen?'none':'flex';
-  this.innerHTML=isOpen?'&#128172;':'&#10005;';
-  if(!isOpen){{var m=document.getElementById('buddyMsgs');if(m)m.scrollTop=m.scrollHeight;}}
-">💬</button>
+<button id="buddyFab">&#128172;</button>
 <script>
-function sendMsg(){{
-  var inp=document.getElementById('buddyInput');
-  var val=inp.value.trim();
-  if(!val)return;
-  inp.value='';
-  var enc=encodeURIComponent(val);
-  window.location.href=window.location.pathname+'?buddy_msg='+enc;
-}}
-(function(){{
-  var m=document.getElementById('buddyMsgs');
-  if(m)m.scrollTop=m.scrollHeight;
+(function() {{
+  // Use addEventListener — inline onclick blocked in Streamlit sandbox
+  var fab = document.getElementById('buddyFab');
+  var panel = document.getElementById('buddyPanel');
+  var sendBtn = document.getElementById('buddySend');
+  var inp = document.getElementById('buddyInput');
+  var msgs = document.getElementById('buddyMsgs');
+
+  if (msgs) msgs.scrollTop = msgs.scrollHeight;
+
+  if (fab) {{
+    fab.addEventListener('click', function() {{
+      var isOpen = panel.style.display === 'flex';
+      panel.style.display = isOpen ? 'none' : 'flex';
+      fab.innerHTML = isOpen ? '&#128172;' : '&#10005;';
+      if (!isOpen && msgs) setTimeout(function(){{ msgs.scrollTop = msgs.scrollHeight; }}, 50);
+    }});
+  }}
+
+  function sendMsg() {{
+    if (!inp) return;
+    var val = inp.value.trim();
+    if (!val) return;
+    inp.value = '';
+    window.location.href = window.location.pathname + '?buddy_msg=' + encodeURIComponent(val);
+  }}
+
+  if (sendBtn) sendBtn.addEventListener('click', sendMsg);
+  if (inp) inp.addEventListener('keydown', function(e) {{ if (e.key === 'Enter') sendMsg(); }});
 }})();
 </script>
 """, unsafe_allow_html=True)
