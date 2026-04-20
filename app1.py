@@ -6,7 +6,6 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import numpy as np
-import time
 from datetime import datetime, date, timedelta
 from google.oauth2.service_account import Credentials
 import gspread
@@ -47,7 +46,7 @@ def get_score(term):
         total += (pct / 100.0) * best
     return round(total, 3)
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=30)
 def load_sheet_data():
     try:
         if "gcp_service_account" not in st.secrets:
@@ -97,7 +96,7 @@ def load_sheet_data():
         import traceback
         return pd.DataFrame(), str(e) + "\n" + traceback.format_exc()
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=30)
 def load_pr_unclosed():
     """Load PR UNCLOSED sheet tab"""
     try:
@@ -134,7 +133,7 @@ def load_pr_unclosed():
     except Exception as e:
         return pd.DataFrame(), str(e)
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=30)
 def load_ongoing_sheet():
     """Load the ongoing/carry-forward sheet tab"""
     try:
@@ -201,45 +200,11 @@ Answer precisely in Rs Crores."""
     except Exception as e:
         return f"Error: {str(e)}"
 
-# ── SPLASH ─────────────────────────────────────────────────────
-if 'loaded' not in st.session_state:
-    splash = st.empty()
-    splash.markdown("""
-<style>
-@keyframes sp{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
-@keyframes pp{0%,100%{opacity:1}50%{opacity:0.3}}
-</style>
-<div style="position:fixed;inset:0;background:#0e0e12;display:flex;align-items:center;
-justify-content:center;flex-direction:column;z-index:9999;">
-<div style="position:relative;width:72px;height:72px;margin-bottom:20px;">
-<div style="position:absolute;inset:0;border-radius:50%;border:3px solid rgba(229,62,62,0.2);
-border-top:3px solid #e53e3e;animation:sp 1s linear infinite;"></div>
-<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:48px;height:48px;
-background:linear-gradient(135deg,#e53e3e,#ff6b6b);border-radius:12px;display:flex;
-align-items:center;justify-content:center;font-size:22px;font-weight:900;color:white;">Z</div>
-</div>
-<div style="font-size:22px;font-weight:700;color:#fff;letter-spacing:-0.02em;">Zetwerk CPT</div>
-<div style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:0.1em;margin-top:5px;">Central Procurement · CAT-2</div>
-<div style="margin-top:20px;width:180px;height:3px;background:rgba(255,255,255,0.06);border-radius:99px;overflow:hidden;">
-<div style="height:100%;width:40%;background:#e53e3e;border-radius:99px;animation:pp 1.2s ease infinite;"></div>
-</div>
-</div>""", unsafe_allow_html=True)
-    df_main, load_err = load_sheet_data()
-    df_ongoing, _ = load_ongoing_sheet()
-    df_pr, _ = load_pr_unclosed()
-    time.sleep(0.3)
-    splash.empty()
-    st.session_state['loaded'] = True
-    st.session_state['df'] = df_main
-    st.session_state['load_err'] = load_err
-    st.session_state['df_ongoing'] = df_ongoing
-    st.session_state['df_pr'] = df_pr
-    st.rerun()
-else:
-    df_main  = st.session_state.get('df', pd.DataFrame())
-    load_err = st.session_state.get('load_err', None)
-    df_ongoing = st.session_state.get('df_ongoing', pd.DataFrame())
-    df_pr = st.session_state.get('df_pr', pd.DataFrame())
+# ── LOAD DATA (runs every 30s via cache TTL) ─────────────────────
+with st.spinner(""):
+    df_main,  load_err = load_sheet_data()
+    df_ongoing, _      = load_ongoing_sheet()
+    df_pr, _           = load_pr_unclosed()
 
 if 'buddy_msgs' not in st.session_state:
     st.session_state.buddy_msgs = [{"role":"assistant","content":"Hi! I am CAT 2 Buddy. Ask me anything about your procurement data."}]
@@ -551,6 +516,16 @@ div[data-layout="wide"] {
 #buddySend:hover { background: #c53030; }
 </style>
 """, unsafe_allow_html=True)
+
+# ── AUTO-REFRESH every 30 seconds ──────────────────────────────
+import streamlit.components.v1 as components_refresh
+components_refresh.html("""
+<script>
+setTimeout(function() {
+  window.parent.location.reload();
+}, 30000);
+</script>
+""", height=0)
 
 # ── NAV ──────────────────────────────────────────────────────────
 now = datetime.now().strftime("%d %b %Y %H:%M")
@@ -910,71 +885,142 @@ with tab5:
         st.warning(f"Supplier Type column not found. Available columns: {cols_available}")
 
 # ════════════════════════════════════════════════
-# TAB 6 — MFC TRACKER (Ongoing only)
+# TAB 6 — MFC TRACKER  
 # ════════════════════════════════════════════════
 with tab6:
-    st.markdown("### MFC Delivery Tracker")
-    # Use FULL unfiltered sheet data — same as email alert, no FY/BU filter
+    st.markdown("### MFC Delivery Tracker — Ongoing POs")
+
+    # Full sheet, no FY filter — same as email
     mfc_full = df_main.copy()
-    # Re-parse numeric columns that may not have been parsed
-    for _col in mfc_full.columns:
-        if _col.strip().upper() in ('OTD','OTIF'):
-            mfc_full[_col] = pd.to_numeric(mfc_full[_col].astype(str).str.replace('%','').str.replace(',',''), errors='coerce')
-    today = pd.Timestamp(date.today())
-    # Find MFC columns with flexible matching (sheet headers may have newlines)
-    mc = next((c for c in mfc_full.columns if 'mfc' in c.lower() and ('dt' in c.lower() or 'date' in c.lower())), None)
-    dc = next((c for c in mfc_full.columns if 'delivery time' in c.lower() and 'mfc' in c.lower()), None)
-    if not mc or not dc:
-        all_cols = list(mfc_full.columns)
-        st.warning(f"MFC columns not found. Available columns: {all_cols}")
+    today    = pd.Timestamp(date.today())
+
+    # Find columns flexibly — handles newlines in header names
+    mc = next((c for c in mfc_full.columns
+               if 'mfc' in c.lower() and any(x in c.lower() for x in ['dt','date'])), None)
+    dc_raw = next((c for c in mfc_full.columns
+               if 'delivery time' in c.lower() and 'mfc' in c.lower()), None)
+
+    if not mc or not dc_raw:
+        st.error(f"MFC columns not found. Columns in sheet: {list(mfc_full.columns)}")
     else:
-        # Only ongoing — exclude completed/shortclose, same logic as email
-        mfc_src = mfc_full.copy()
-        if 'Delivery Status' in mfc_src.columns:
-            mfc_src = mfc_src[~mfc_src['Delivery Status'].str.strip().str.lower().isin(['completed','shortclose'])]
-        keep = [c for c in ["SN","BU","Project Name","Items","Category","Supplier Name","PO/ OD Ref.","PO Dt.",mc,dc,"Delivery Status","Current Status"] if c in mfc_src.columns]
-        mf = mfc_src[keep].copy()
-        mf[mc] = pd.to_datetime(mf[mc], dayfirst=True, errors='coerce')
-        mf[dc] = pd.to_numeric(mf[dc], errors='coerce')
-        mf = mf.dropna(subset=[mc,dc]); mf = mf[mf[dc]>0]
+        # Normalise the delivery days column — clean and parse
+        mfc_full['_dc'] = pd.to_numeric(
+            mfc_full[dc_raw].astype(str).str.replace('%','').str.replace(',',''), errors='coerce')
+        mfc_full['_mc'] = pd.to_datetime(mfc_full[mc], dayfirst=True, errors='coerce')
+
+        # Only ongoing
+        if 'Delivery Status' in mfc_full.columns:
+            mfc_full = mfc_full[~mfc_full['Delivery Status'].str.strip().str.lower()
+                                .isin(['completed','shortclose'])]
+
+        mf = mfc_full.dropna(subset=['_mc','_dc']).copy()
+        mf = mf[mf['_dc'] > 0].copy()
+
         if mf.empty:
-            st.info("No ongoing POs with valid MFC date and delivery days found.")
+            st.info("No ongoing POs with valid MFC date and delivery days.")
         else:
-            mf["Expected"] = mf.apply(lambda r: r[mc]+timedelta(days=int(r[dc])), axis=1)
-            mf["Days Left"] = (mf["Expected"]-today).dt.days
-            mf["Threshold"] = np.ceil(mf[dc]/3).astype(int)
+            mf['Expected']  = mf['_mc'] + pd.to_timedelta(mf['_dc'].astype(int), unit='D')
+            mf['Days Left'] = (mf['Expected'] - today).dt.days
+            mf['Threshold'] = np.ceil(mf['_dc'] / 3).astype(int)
+
             def clf(r):
-                if r["Days Left"]<=0: return "OVERDUE"
-                elif r["Days Left"]<=r["Threshold"]: return "RED"
-                elif r["Days Left"]<=30: return "AMBER"
-                else: return "GREEN"
-            mf["Alert"] = mf.apply(clf, axis=1)
-            cnt = mf["Alert"].value_counts()
-            st.markdown(f"""
-<div class="kGrid k4" style="padding:12px 0 0;">
-{kcard(str(cnt.get("GREEN",0)), "On Track", "", "", "", "kGreen")}
-{kcard(str(cnt.get("AMBER",0)), "Amber Alert", "", "", "", "kAmber")}
-{kcard(str(cnt.get("RED",0)), "Red Alert", "", "", "", "kRed")}
-{kcard(str(cnt.get("OVERDUE",0)), "Overdue", "", "", "", "kPurple")}
+                if r['Days Left'] <= 0:              return 'OVERDUE'
+                elif r['Days Left'] <= r['Threshold']: return 'RED'
+                elif r['Days Left'] <= 30:             return 'AMBER'
+                else:                                  return 'GREEN'
+            mf['Alert'] = mf.apply(clf, axis=1)
+
+            cnt = mf['Alert'].value_counts()
+            g = int(cnt.get('GREEN',0))
+            a = int(cnt.get('AMBER',0))
+            r_ = int(cnt.get('RED',0))
+            ov= int(cnt.get('OVERDUE',0))
+
+            # ── Interactive traffic light cards ──────────────────
+            # Click a card to filter the table below
+            if 'mfc_filter' not in st.session_state:
+                st.session_state.mfc_filter = 'ALL'
+
+            col_g, col_a, col_r, col_ov, col_all = st.columns(5)
+
+            def card_btn(col, label, count, key, color_hex, bg_hex):
+                selected = st.session_state.mfc_filter == key
+                border = f"3px solid {color_hex}" if selected else f"1px solid {color_hex}40"
+                with col:
+                    st.markdown(f"""
+<div style="background:{bg_hex};border:{border};border-radius:12px;
+padding:16px;text-align:center;cursor:pointer;transition:all 0.2s;">
+  <div style="font-size:11px;font-weight:700;color:{color_hex};text-transform:uppercase;
+  letter-spacing:0.07em;">{label}</div>
+  <div style="font-size:36px;font-weight:800;color:{'#fff' if selected else color_hex};
+  font-family:'DM Mono',monospace;margin:4px 0;">{count}</div>
+  <div style="font-size:10px;color:{color_hex}88;">{"▼ Selected" if selected else "Click to filter"}</div>
 </div>""", unsafe_allow_html=True)
-            red = mf[mf["Alert"].isin(["RED","OVERDUE"])]
-            if not red.empty:
-                st.markdown(f'<div style="background:#2a0000;border-left:4px solid #ff4444;padding:12px 16px;border-radius:8px;color:#ff9999;margin:12px 0;font-size:14px;"><b>{len(red)} PO(s) are RED or OVERDUE.</b> Immediate action required. Weekly email sent to ayushkamle16@gmail.com every Monday 8AM.</div>', unsafe_allow_html=True)
-            af = st.multiselect("Filter by Alert", ["OVERDUE","RED","AMBER","GREEN"], default=["OVERDUE","RED","AMBER"])
-            disp = mf[mf["Alert"].isin(af)].copy() if af else mf.copy()
-            ds = disp.copy()
-            ds[mc] = ds[mc].dt.strftime("%d-%b-%Y")
-            ds["Expected"] = ds["Expected"].dt.strftime("%d-%b-%Y")
-            if "PO Dt." in ds.columns:
-                ds["PO Dt."] = pd.to_datetime(ds["PO Dt."],errors='coerce').dt.strftime("%d-%b-%Y")
+                    if st.button(f"{'✓ ' if selected else ''}{label}", key=f"mfc_btn_{key}",
+                                 use_container_width=True,
+                                 type="primary" if selected else "secondary"):
+                        st.session_state.mfc_filter = key if not selected else 'ALL'
+                        st.rerun()
+
+            card_btn(col_g,  "GREEN",   g,  "GREEN",   "#38a169", "rgba(56,161,105,0.1)")
+            card_btn(col_a,  "AMBER",   a,  "AMBER",   "#d69e2e", "rgba(214,158,46,0.1)")
+            card_btn(col_r,  "RED",     r_, "RED",     "#e53e3e", "rgba(229,62,62,0.1)")
+            card_btn(col_ov, "OVERDUE", ov, "OVERDUE", "#ff4444", "rgba(229,62,62,0.2)")
+            card_btn(col_all,"ALL",     len(mf), "ALL", "#666",   "rgba(255,255,255,0.04)")
+
+            # ── Filter based on selection ─────────────────────────
+            sel = st.session_state.mfc_filter
+            if sel == 'ALL':
+                disp = mf.copy()
+            else:
+                disp = mf[mf['Alert'] == sel].copy()
+
+            if sel != 'ALL' and len(disp) > 0:
+                st.markdown(f"""
+<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);
+border-radius:10px;padding:12px 16px;margin:12px 0;">
+  <div style="font-size:13px;color:#ccc;font-weight:600;">{sel} — {len(disp)} POs</div>
+</div>""", unsafe_allow_html=True)
+
+            # ── BU filter ─────────────────────────────────────────
+            col_bf, col_cat = st.columns(2)
+            with col_bf:
+                bu_mfc_opts = ['All BU'] + sorted([b for b in disp['BU'].dropna().unique() if b]) if 'BU' in disp.columns else ['All BU']
+                sel_bu_mfc = st.selectbox('BU', bu_mfc_opts, key='mfc_bu')
+            with col_cat:
+                cat_mfc_opts = ['All Category'] + sorted([c for c in disp['Category'].dropna().unique() if c]) if 'Category' in disp.columns else ['All Category']
+                sel_cat_mfc = st.selectbox('Category', cat_mfc_opts, key='mfc_cat')
+
+            if sel_bu_mfc != 'All BU' and 'BU' in disp.columns:
+                disp = disp[disp['BU'] == sel_bu_mfc]
+            if sel_cat_mfc != 'All Category' and 'Category' in disp.columns:
+                disp = disp[disp['Category'] == sel_cat_mfc]
+
+            # ── Display table ─────────────────────────────────────
+            # Show key columns with formatted dates
+            show_cols = [c for c in ['SN','BU','Project Name','Items','Category',
+                         'Supplier Name','PO/ OD Ref.','Delivery Status'] if c in disp.columns]
+            show_cols += ['_mc','_dc','Expected','Days Left','Alert']
+
+            ds = disp[show_cols].copy()
+            ds = ds.rename(columns={'_mc': 'MFC Date', '_dc': 'Delivery Days'})
+            ds['MFC Date']  = ds['MFC Date'].dt.strftime('%d-%b-%Y')
+            ds['Expected']  = ds['Expected'].dt.strftime('%d-%b-%Y')
+
+            alert_colors = {
+                'OVERDUE': 'background-color:#2a0000;color:#ff9999;font-weight:700;',
+                'RED':     'background-color:#1a0000;color:#ff6666;font-weight:700;',
+                'AMBER':   'background-color:#1a1000;color:#ffcc66;',
+                'GREEN':   'background-color:#001a00;color:#66cc66;',
+            }
             def hl(row):
-                s = {"OVERDUE":"background-color:#2a0000;color:#ff9999;font-weight:bold;font-size:14px",
-                     "RED":"background-color:#1a0000;color:#ff6666;font-weight:bold;font-size:14px",
-                     "AMBER":"background-color:#1a1000;color:#ffcc66;font-size:13px",
-                     "GREEN":"background-color:#001a00;color:#66cc66;font-size:13px"}.get(row["Alert"],"")
-                return [s]*len(row)
-            st.markdown(f'**{len(disp)} POs shown**', unsafe_allow_html=False)
-            st.dataframe(ds.style.apply(hl,axis=1), use_container_width=True, height=min(40*len(disp)+50, 800))
+                s = alert_colors.get(row['Alert'], '') + 'font-size:13px;'
+                return [s] * len(row)
+
+            st.markdown(f"**{len(ds)} POs**", unsafe_allow_html=False)
+            st.dataframe(ds.style.apply(hl, axis=1),
+                         use_container_width=True,
+                         height=min(40*len(ds)+60, 800))
 
 # ════════════════════════════════════════════════
 # TAB 7 — ONGOING POs (carry-forward sheet)
