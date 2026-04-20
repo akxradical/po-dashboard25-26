@@ -97,6 +97,44 @@ def load_sheet_data():
         import traceback
         return pd.DataFrame(), str(e) + "\n" + traceback.format_exc()
 
+@st.cache_data(ttl=300)
+def load_ongoing_sheet():
+    """Load the ongoing/carry-forward sheet tab"""
+    try:
+        creds = Credentials.from_service_account_info(
+            dict(st.secrets["gcp_service_account"]),
+            scopes=["https://spreadsheets.google.com/feeds",
+                    "https://www.googleapis.com/auth/drive"])
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key("11iDCUUEry2YsokCyvqsp6w8yi295fcX7w-K23BrSHQU")
+        # Try the ongoing tab
+        ws = None
+        for tab in ["ongoing updated with realized27", "ongoing", "Ongoing"]:
+            try: ws = sh.worksheet(tab); break
+            except: continue
+        if not ws:
+            return pd.DataFrame(), f"Ongoing tab not found"
+        data = ws.get_all_values()
+        if len(data) < 3: return pd.DataFrame(), "Ongoing sheet too short"
+        # Row 1 = title, Row 2 = headers
+        headers = data[1]
+        rows    = data[2:]
+        df = pd.DataFrame(rows, columns=headers)
+        df.columns = [c.strip() for c in df.columns]
+        df = df[df.apply(lambda r: any(str(v).strip() for v in r), axis=1)].copy()
+        # Parse numeric cols
+        for col in df.columns:
+            if any(x in col.lower() for x in ['value', 'savings', 'amount']):
+                df[col] = pd.to_numeric(
+                    df[col].astype(str).str.replace(',','').str.replace('₹',''), errors='coerce')
+        # Parse date
+        for col in df.columns:
+            if 'date' in col.lower() or 'dt' in col.lower():
+                df[col] = pd.to_datetime(df[col], errors='coerce', dayfirst=True)
+        return df, None
+    except Exception as e:
+        return pd.DataFrame(), str(e)
+
 def chat_with_buddy(user_query, df):
     ctx = f"""You are CAT 2 Buddy, AI procurement assistant for Zetwerk CPT CAT-2.
 Be sharp and professional. Never mention Claude or Anthropic.
@@ -150,15 +188,18 @@ align-items:center;justify-content:center;font-size:22px;font-weight:900;color:w
 </div>
 </div>""", unsafe_allow_html=True)
     df_main, load_err = load_sheet_data()
+    df_ongoing, _ = load_ongoing_sheet()
     time.sleep(0.3)
     splash.empty()
     st.session_state['loaded'] = True
     st.session_state['df'] = df_main
     st.session_state['load_err'] = load_err
+    st.session_state['df_ongoing'] = df_ongoing
     st.rerun()
 else:
-    df_main = st.session_state.get('df', pd.DataFrame())
+    df_main  = st.session_state.get('df', pd.DataFrame())
     load_err = st.session_state.get('load_err', None)
+    df_ongoing = st.session_state.get('df_ongoing', pd.DataFrame())
 
 if 'buddy_msgs' not in st.session_state:
     st.session_state.buddy_msgs = [{"role":"assistant","content":"Hi! I am CAT 2 Buddy. Ask me anything about your procurement data."}]
@@ -590,9 +631,9 @@ def kcard(val, label, sub, delta="", delta_cls="", color_cls="kBlue"):
 </div>"""
 
 # ── TABS ─────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "Overview", "Spend & Savings", "TAT & OTIF",
-    "Working Capital", "New Vendor Dev", "MFC Tracker"
+    "Working Capital", "New Vendor Dev", "MFC Tracker", "Ongoing POs"
 ])
 
 # ════════════════════════════════════════════════
@@ -841,7 +882,9 @@ with tab6:
             mfc_full[_col] = pd.to_numeric(mfc_full[_col].astype(str).str.replace('%','').str.replace(',',''), errors='coerce')
     today = pd.Timestamp(date.today())
     mc = next((c for c in ["MFC Dt.","MFC Date"] if c in mfc_full.columns), None)
-    dc = next((c for c in ["Delivery Time from MFC (Days)","Delivery Time from MFC"] if c in mfc_full.columns), None)
+    # Column name may contain newline — check all variants
+    dc = next((c for c in mfc_full.columns 
+               if 'delivery time' in c.lower() and 'mfc' in c.lower()), None)
     if not mc or not dc:
         st.warning("MFC Dt. or Delivery Time from MFC columns not found.")
     else:
@@ -892,6 +935,92 @@ with tab6:
                 return [s]*len(row)
             st.markdown(f'**{len(disp)} POs shown**', unsafe_allow_html=False)
             st.dataframe(ds.style.apply(hl,axis=1), use_container_width=True, height=min(40*len(disp)+50, 800))
+
+# ════════════════════════════════════════════════
+# TAB 7 — ONGOING POs (from carry-forward sheet)
+# ════════════════════════════════════════════════
+with tab7:
+    if df_ongoing.empty:
+        st.info("Ongoing sheet not loaded. Check tab name: 'ongoing updated with realized27'")
+    else:
+        st.markdown(f"**{len(df_ongoing)} ongoing / carry-forward POs**")
+
+        # Refresh button
+        if st.button("Refresh Ongoing Data", key="ref_ongoing"):
+            load_ongoing_sheet.clear()
+            st.session_state.pop('df_ongoing', None)
+            df_ongoing2, _ = load_ongoing_sheet()
+            st.session_state['df_ongoing'] = df_ongoing2
+            st.rerun()
+
+        # Find key columns
+        val_col = next((c for c in df_ongoing.columns
+                        if 'value' in c.lower() and ('po' in c.lower() or 'gst' in c.lower())), None)
+        sav_col = next((c for c in df_ongoing.columns if 'saving' in c.lower()), None)
+
+        # Summary KPIs
+        total_ong = len(df_ongoing)
+        total_val = df_ongoing[val_col].sum() / 1e7 if val_col else 0
+        total_sav_ong = df_ongoing[sav_col].sum() / 1e7 if sav_col else 0
+
+        # BU filter
+        bu_list_ong = ['All BU']
+        if 'BU' in df_ongoing.columns:
+            bu_list_ong += sorted([b for b in df_ongoing['BU'].dropna().unique() if b])
+        sel_bu_ong = st.selectbox('Filter by BU', bu_list_ong, key='ong_bu')
+        df_ong_f = df_ongoing.copy()
+        if sel_bu_ong != 'All BU': df_ong_f = df_ong_f[df_ong_f['BU'] == sel_bu_ong]
+
+        # KPI cards
+        st.markdown(f"""
+<div class="kGrid k4" style="padding:8px 0;">
+  <div class="kc blue">
+    <div class="kLabel">Total Ongoing POs</div>
+    <div class="kVal">{len(df_ong_f)}</div>
+    <div class="kSub">Carry-forward FY 25-26</div>
+  </div>
+  <div class="kc red">
+    <div class="kLabel">PO Value (incl. GST)</div>
+    <div class="kVal">{"Rs " + f"{df_ong_f[val_col].sum()/1e7:.1f} Cr" if val_col else "—"}</div>
+    <div class="kSub">Yet to be delivered</div>
+  </div>
+  <div class="kc {"green" if total_sav_ong > 0 else "amber"}">
+    <div class="kLabel">Realized Savings</div>
+    <div class="kVal">{"Rs " + f"{df_ong_f[sav_col].sum()/1e7:.2f} Cr" if sav_col else "—"}</div>
+    <div class="kSub">FY 26-27</div>
+  </div>
+  <div class="kc teal">
+    <div class="kLabel">BUs Covered</div>
+    <div class="kVal">{df_ong_f["BU"].nunique() if "BU" in df_ong_f.columns else "—"}</div>
+    <div class="kSub">Business units</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+        # BU breakdown
+        if 'BU' in df_ong_f.columns and val_col:
+            bu_ong = df_ong_f.groupby('BU').agg(
+                pos=(val_col, 'count'),
+                val=(val_col, 'sum')
+            ).reset_index()
+            bu_ong['val_cr'] = bu_ong['val'] / 1e7
+            rows_ong = ""
+            for _, r in bu_ong.sort_values('val_cr', ascending=False).iterrows():
+                rows_ong += f'<tr><td><b style="color:#eee">{r["BU"]}</b></td><td class="mono">{int(r["pos"])}</td><td class="mono">Rs {r["val_cr"]:.2f} Cr</td></tr>'
+            st.markdown(f'<div style="background:#13131a;border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:8px 0;margin-bottom:12px;"><table class="zTbl"><thead><tr><th>BU</th><th>POs</th><th>Value</th></tr></thead><tbody>{rows_ong}</tbody></table></div>', unsafe_allow_html=True)
+
+        # Full table
+        st.markdown("**All Ongoing POs**")
+        # Format date columns for display
+        display_df = df_ong_f.copy()
+        for col in display_df.columns:
+            if pd.api.types.is_datetime64_any_dtype(display_df[col]):
+                display_df[col] = display_df[col].dt.strftime("%d-%b-%Y")
+            elif pd.api.types.is_float_dtype(display_df[col]):
+                display_df[col] = display_df[col].apply(
+                    lambda x: f"{x:,.0f}" if pd.notna(x) and x != 0 else "")
+        st.dataframe(display_df, use_container_width=True,
+                     height=min(40*len(df_ong_f)+50, 600))
 
 # ── FOOTER ───────────────────────────────────────────────────────
 st.markdown(f"""
