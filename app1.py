@@ -98,6 +98,43 @@ def load_sheet_data():
         return pd.DataFrame(), str(e) + "\n" + traceback.format_exc()
 
 @st.cache_data(ttl=300)
+def load_pr_unclosed():
+    """Load PR UNCLOSED sheet tab"""
+    try:
+        creds = Credentials.from_service_account_info(
+            dict(st.secrets["gcp_service_account"]),
+            scopes=["https://spreadsheets.google.com/feeds",
+                    "https://www.googleapis.com/auth/drive"])
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key("11iDCUUEry2YsokCyvqsp6w8yi295fcX7w-K23BrSHQU")
+        ws = None
+        for tab in ["PR UNCLOSED", "pr unclosed", "PR Unclosed"]:
+            try: ws = sh.worksheet(tab); break
+            except: continue
+        if not ws:
+            return pd.DataFrame(), "PR UNCLOSED tab not found"
+        data = ws.get_all_values()
+        if len(data) < 2: return pd.DataFrame(), "Empty"
+        df = pd.DataFrame(data[1:], columns=data[0])
+        df.columns = [c.strip() for c in df.columns]
+        df = df[df.apply(lambda r: any(str(v).strip() for v in r), axis=1)].copy()
+        # Parse dates
+        for col in df.columns:
+            if any(x in col.lower() for x in ["pr dt", "rev. pr", "tqr", "nfa dt", "nfa app"]):
+                df[col] = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
+        # Parse PR-PO TAT
+        if "PR - PO TAT" in df.columns:
+            df["PR - PO TAT"] = pd.to_numeric(df["PR - PO TAT"], errors="coerce")
+        # Calculate PR revision delay: Rev PR Dt - PR Dt
+        pr_col  = next((c for c in df.columns if "pr dt" in c.lower() and "rev" not in c.lower()), None)
+        rev_col = next((c for c in df.columns if "rev" in c.lower() and "pr" in c.lower()), None)
+        if pr_col and rev_col:
+            df["PR Revision Delay (Days)"] = (df[rev_col] - df[pr_col]).dt.days
+        return df, None
+    except Exception as e:
+        return pd.DataFrame(), str(e)
+
+@st.cache_data(ttl=300)
 def load_ongoing_sheet():
     """Load the ongoing/carry-forward sheet tab"""
     try:
@@ -189,17 +226,20 @@ align-items:center;justify-content:center;font-size:22px;font-weight:900;color:w
 </div>""", unsafe_allow_html=True)
     df_main, load_err = load_sheet_data()
     df_ongoing, _ = load_ongoing_sheet()
+    df_pr, _ = load_pr_unclosed()
     time.sleep(0.3)
     splash.empty()
     st.session_state['loaded'] = True
     st.session_state['df'] = df_main
     st.session_state['load_err'] = load_err
     st.session_state['df_ongoing'] = df_ongoing
+    st.session_state['df_pr'] = df_pr
     st.rerun()
 else:
     df_main  = st.session_state.get('df', pd.DataFrame())
     load_err = st.session_state.get('load_err', None)
     df_ongoing = st.session_state.get('df_ongoing', pd.DataFrame())
+    df_pr = st.session_state.get('df_pr', pd.DataFrame())
 
 if 'buddy_msgs' not in st.session_state:
     st.session_state.buddy_msgs = [{"role":"assistant","content":"Hi! I am CAT 2 Buddy. Ask me anything about your procurement data."}]
@@ -631,9 +671,9 @@ def kcard(val, label, sub, delta="", delta_cls="", color_cls="kBlue"):
 </div>"""
 
 # ── TABS ─────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "Overview", "Spend & Savings", "TAT & OTIF",
-    "Working Capital", "New Vendor Dev", "MFC Tracker", "Ongoing POs"
+    "Working Capital", "New Vendor Dev", "MFC Tracker", "Ongoing POs", "PR Unclosed"
 ])
 
 # ════════════════════════════════════════════════
@@ -881,12 +921,12 @@ with tab6:
         if _col.strip().upper() in ('OTD','OTIF'):
             mfc_full[_col] = pd.to_numeric(mfc_full[_col].astype(str).str.replace('%','').str.replace(',',''), errors='coerce')
     today = pd.Timestamp(date.today())
-    mc = next((c for c in ["MFC Dt.","MFC Date"] if c in mfc_full.columns), None)
-    # Column name may contain newline — check all variants
-    dc = next((c for c in mfc_full.columns 
-               if 'delivery time' in c.lower() and 'mfc' in c.lower()), None)
+    # Find MFC columns with flexible matching (sheet headers may have newlines)
+    mc = next((c for c in mfc_full.columns if 'mfc' in c.lower() and ('dt' in c.lower() or 'date' in c.lower())), None)
+    dc = next((c for c in mfc_full.columns if 'delivery time' in c.lower() and 'mfc' in c.lower()), None)
     if not mc or not dc:
-        st.warning("MFC Dt. or Delivery Time from MFC columns not found.")
+        all_cols = list(mfc_full.columns)
+        st.warning(f"MFC columns not found. Available columns: {all_cols}")
     else:
         # Only ongoing — exclude completed/shortclose, same logic as email
         mfc_src = mfc_full.copy()
@@ -937,90 +977,249 @@ with tab6:
             st.dataframe(ds.style.apply(hl,axis=1), use_container_width=True, height=min(40*len(disp)+50, 800))
 
 # ════════════════════════════════════════════════
-# TAB 7 — ONGOING POs (from carry-forward sheet)
+# TAB 7 — ONGOING POs (carry-forward sheet)
+# Cols: S.No, BU, Project Name, Items, Category, Supplier Name,
+#       PO/OD Ref, PO Date, PO Value (incl.GST), PO Yet to Deliver (incl.GST),
+#       Delivery Status, Current Status, ..., Delivered FY26-27, Realized Savings FY26-27
 # ════════════════════════════════════════════════
 with tab7:
     if df_ongoing.empty:
-        st.info("Ongoing sheet not loaded. Check tab name: 'ongoing updated with realized27'")
+        st.info("Ongoing sheet not loaded. Tab name: 'ongoing updated with realized27'")
     else:
-        st.markdown(f"**{len(df_ongoing)} ongoing / carry-forward POs**")
-
-        # Refresh button
-        if st.button("Refresh Ongoing Data", key="ref_ongoing"):
+        # ── Refresh ──
+        if st.button("Refresh", key="ref_ongoing"):
             load_ongoing_sheet.clear()
             st.session_state.pop('df_ongoing', None)
-            df_ongoing2, _ = load_ongoing_sheet()
-            st.session_state['df_ongoing'] = df_ongoing2
+            df_ongoing, _ = load_ongoing_sheet()
+            st.session_state['df_ongoing'] = df_ongoing
             st.rerun()
 
-        # Find key columns
-        val_col = next((c for c in df_ongoing.columns
-                        if 'value' in c.lower() and ('po' in c.lower() or 'gst' in c.lower())), None)
-        sav_col = next((c for c in df_ongoing.columns if 'saving' in c.lower()), None)
+        # ── Identify key columns by name matching ──
+        po_val_col   = next((c for c in df_ongoing.columns if 'po value' in c.lower() and 'gst' in c.lower()), None)
+        ytd_col      = next((c for c in df_ongoing.columns if 'yet to' in c.lower() and 'deliver' in c.lower()), None)
+        del_status   = next((c for c in df_ongoing.columns if c.strip().lower() == 'delivery status'), None)
+        realized_col = next((c for c in df_ongoing.columns if 'realized' in c.lower() and 'saving' in c.lower()), None)
+        delivered_col= next((c for c in df_ongoing.columns if 'delivered in' in c.lower()), None)
 
-        # Summary KPIs
-        total_ong = len(df_ongoing)
-        total_val = df_ongoing[val_col].sum() / 1e7 if val_col else 0
-        total_sav_ong = df_ongoing[sav_col].sum() / 1e7 if sav_col else 0
+        # Parse numeric
+        for col in [po_val_col, ytd_col, realized_col, delivered_col]:
+            if col and col in df_ongoing.columns:
+                df_ongoing[col] = pd.to_numeric(
+                    df_ongoing[col].astype(str).str.replace(',','').str.replace('₹',''), errors='coerce').fillna(0)
 
-        # BU filter
-        bu_list_ong = ['All BU']
+        # ── Delivery Status counts ──
+        n_ong_ongoing  = 0
+        n_ong_comp     = 0
+        if del_status:
+            n_ong_ongoing = len(df_ongoing[df_ongoing[del_status].str.strip().str.lower().isin(['ongoing','pending',''])])
+            n_ong_comp    = len(df_ongoing[df_ongoing[del_status].str.strip().str.lower().isin(['completed','shortclose'])])
+
+        # ── Totals ──
+        total_po_val   = df_ongoing[po_val_col].sum() / 1e7 if po_val_col else 0
+        total_ytd      = df_ongoing[ytd_col].sum() / 1e7 if ytd_col else 0
+        total_realized = df_ongoing[realized_col].sum() / 1e7 if realized_col else 0
+        total_delivered= df_ongoing[delivered_col].sum() / 1e7 if delivered_col else 0
+
+        # ── BU filter ──
+        bu_opts_ong = ['All BU']
         if 'BU' in df_ongoing.columns:
-            bu_list_ong += sorted([b for b in df_ongoing['BU'].dropna().unique() if b])
-        sel_bu_ong = st.selectbox('Filter by BU', bu_list_ong, key='ong_bu')
-        df_ong_f = df_ongoing.copy()
-        if sel_bu_ong != 'All BU': df_ong_f = df_ong_f[df_ong_f['BU'] == sel_bu_ong]
+            bu_opts_ong += sorted([b for b in df_ongoing['BU'].dropna().unique() if b])
+        sel_bu_ong = st.selectbox('Filter by BU', bu_opts_ong, key='ong_bu')
+        dfo = df_ongoing.copy()
+        if sel_bu_ong != 'All BU' and 'BU' in dfo.columns:
+            dfo = dfo[dfo['BU'] == sel_bu_ong]
 
-        # KPI cards
+        # ── KPI Cards ──
         st.markdown(f"""
 <div class="kGrid k4" style="padding:8px 0;">
   <div class="kc blue">
-    <div class="kLabel">Total Ongoing POs</div>
-    <div class="kVal">{len(df_ong_f)}</div>
-    <div class="kSub">Carry-forward FY 25-26</div>
+    <div class="kLabel">Total Carry-Forward POs</div>
+    <div class="kVal">{len(dfo)}</div>
+    <div class="kSub">Ongoing: {n_ong_ongoing} &nbsp;|&nbsp; Completed: {n_ong_comp}</div>
   </div>
   <div class="kc red">
     <div class="kLabel">PO Value (incl. GST)</div>
-    <div class="kVal">{"Rs " + f"{df_ong_f[val_col].sum()/1e7:.1f} Cr" if val_col else "—"}</div>
-    <div class="kSub">Yet to be delivered</div>
+    <div class="kVal">Rs {dfo[po_val_col].sum()/1e7:.2f} Cr</div>
+    <div class="kSub">Total contracted value</div>
   </div>
-  <div class="kc {"green" if total_sav_ong > 0 else "amber"}">
-    <div class="kLabel">Realized Savings</div>
-    <div class="kVal">{"Rs " + f"{df_ong_f[sav_col].sum()/1e7:.2f} Cr" if sav_col else "—"}</div>
-    <div class="kSub">FY 26-27</div>
+  <div class="kc amber">
+    <div class="kLabel">Yet to Deliver</div>
+    <div class="kVal">Rs {dfo[ytd_col].sum()/1e7:.2f} Cr</div>
+    <div class="kSub">Pending delivery value</div>
   </div>
-  <div class="kc teal">
-    <div class="kLabel">BUs Covered</div>
-    <div class="kVal">{df_ong_f["BU"].nunique() if "BU" in df_ong_f.columns else "—"}</div>
-    <div class="kSub">Business units</div>
+  <div class="kc green">
+    <div class="kLabel">Realized Savings FY 26-27</div>
+    <div class="kVal">Rs {dfo[realized_col].sum()/1e7:.2f} Cr</div>
+    <div class="kSub">Delivered in FY26-27: Rs {dfo[delivered_col].sum()/1e7:.2f} Cr</div>
+  </div>
+</div>
+""" if po_val_col and ytd_col and realized_col and delivered_col else
+f"""<div style="color:#888;padding:8px;">Loading KPIs... po_val={po_val_col} ytd={ytd_col} realized={realized_col}</div>""",
+        unsafe_allow_html=True)
+
+        # ── BU Breakdown table ──
+        if 'BU' in dfo.columns and po_val_col and ytd_col:
+            bu_ong = dfo.groupby('BU').agg(
+                pos=('S.No', 'count') if 'S.No' in dfo.columns else (po_val_col, 'count'),
+                val=(po_val_col, 'sum'),
+                ytd=(ytd_col, 'sum'),
+                **({'real': (realized_col, 'sum')} if realized_col else {})
+            ).reset_index()
+            rows_ong = ""
+            for _, r in bu_ong.sort_values('val', ascending=False).iterrows():
+                real_str = f"Rs {r['real']/1e7:.2f} Cr" if realized_col and 'real' in r else "—"
+                rows_ong += f'<tr><td><b style="color:#eee">{r["BU"]}</b></td><td class="mono">{int(r["pos"])}</td><td class="mono">Rs {r["val"]/1e7:.2f} Cr</td><td class="mono">Rs {r["ytd"]/1e7:.2f} Cr</td><td class="mono">{real_str}</td></tr>'
+            st.markdown(f'<div style="background:#13131a;border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:8px 0;margin:8px 0 12px;"><table class="zTbl"><thead><tr><th>BU</th><th>POs</th><th>PO Value</th><th>Yet to Deliver</th><th>Realized Savings</th></tr></thead><tbody>{rows_ong}</tbody></table></div>', unsafe_allow_html=True)
+
+        # ── Full detail table ──
+        st.markdown(f"**All {len(dfo)} POs — Full Detail View**")
+        disp_ong = dfo.copy()
+        for col in disp_ong.columns:
+            if pd.api.types.is_datetime64_any_dtype(disp_ong[col]):
+                disp_ong[col] = disp_ong[col].dt.strftime("%d-%b-%Y")
+            elif col in [po_val_col, ytd_col, realized_col, delivered_col]:
+                disp_ong[col] = disp_ong[col].apply(lambda x: f"{x:,.0f}" if pd.notna(x) and x != 0 else "")
+        st.dataframe(disp_ong, use_container_width=True, height=min(40*len(dfo)+50, 700))
+
+
+# ════════════════════════════════════════════════
+# TAB 8 — PR UNCLOSED
+# Tracks PRs not yet converted to PO
+# Shows PR Dt, Rev PR Dt, delay between them
+# ════════════════════════════════════════════════
+with tab8:
+    if df_pr.empty:
+        st.info("PR UNCLOSED sheet not loaded.")
+    else:
+        if st.button("Refresh PR Data", key="ref_pr"):
+            load_pr_unclosed.clear()
+            st.session_state.pop('df_pr', None)
+            df_pr, _ = load_pr_unclosed()
+            st.session_state['df_pr'] = df_pr
+            st.rerun()
+
+        # Identify date columns
+        pr_col  = next((c for c in df_pr.columns if "pr dt" in c.lower() and "rev" not in c.lower()), None)
+        rev_col = next((c for c in df_pr.columns if "rev" in c.lower() and "pr" in c.lower()), None)
+        delay_col = "PR Revision Delay (Days)" if "PR Revision Delay (Days)" in df_pr.columns else None
+
+        # BU filter
+        bu_opts_pr = ['All BU']
+        if 'BU' in df_pr.columns:
+            bu_opts_pr += sorted([b for b in df_pr['BU'].dropna().unique() if b])
+        sel_bu_pr = st.selectbox('Filter by BU', bu_opts_pr, key='pr_bu')
+        dfp = df_pr.copy()
+        if sel_bu_pr != 'All BU' and 'BU' in dfp.columns:
+            dfp = dfp[dfp['BU'] == sel_bu_pr]
+
+        # Category filter
+        cat_opts_pr = ['All Category']
+        if 'Category' in dfp.columns:
+            cat_opts_pr += sorted([c for c in dfp['Category'].dropna().unique() if c])
+        sel_cat_pr = st.selectbox('Filter by Category', cat_opts_pr, key='pr_cat')
+        if sel_cat_pr != 'All Category' and 'Category' in dfp.columns:
+            dfp = dfp[dfp['Category'] == sel_cat_pr]
+
+        # KPIs
+        n_total   = len(dfp)
+        n_revised = len(dfp[dfp[rev_col].notna()]) if rev_col else 0
+        n_no_rev  = n_total - n_revised
+        avg_delay = float(dfp[delay_col].dropna().mean()) if delay_col else 0
+        max_delay = float(dfp[delay_col].dropna().max()) if delay_col else 0
+
+        st.markdown(f"""
+<div class="kGrid k4" style="padding:8px 0;">
+  <div class="kc red">
+    <div class="kLabel">Total Unclosed PRs</div>
+    <div class="kVal">{n_total}</div>
+    <div class="kSub">Not yet converted to PO</div>
+  </div>
+  <div class="kc amber">
+    <div class="kLabel">PRs Revised</div>
+    <div class="kVal">{n_revised}</div>
+    <div class="kSub">{n_no_rev} with no revision</div>
+  </div>
+  <div class="kc {"red" if avg_delay > 30 else "amber"}">
+    <div class="kLabel">Avg Revision Delay</div>
+    <div class="kVal">{avg_delay:.0f}d</div>
+    <div class="kSub">PR Dt to Rev PR Dt</div>
+  </div>
+  <div class="kc red">
+    <div class="kLabel">Max Revision Delay</div>
+    <div class="kVal">{max_delay:.0f}d</div>
+    <div class="kSub">Longest revision gap</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
 
-        # BU breakdown
-        if 'BU' in df_ong_f.columns and val_col:
-            bu_ong = df_ong_f.groupby('BU').agg(
-                pos=(val_col, 'count'),
-                val=(val_col, 'sum')
-            ).reset_index()
-            bu_ong['val_cr'] = bu_ong['val'] / 1e7
-            rows_ong = ""
-            for _, r in bu_ong.sort_values('val_cr', ascending=False).iterrows():
-                rows_ong += f'<tr><td><b style="color:#eee">{r["BU"]}</b></td><td class="mono">{int(r["pos"])}</td><td class="mono">Rs {r["val_cr"]:.2f} Cr</td></tr>'
-            st.markdown(f'<div style="background:#13131a;border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:8px 0;margin-bottom:12px;"><table class="zTbl"><thead><tr><th>BU</th><th>POs</th><th>Value</th></tr></thead><tbody>{rows_ong}</tbody></table></div>', unsafe_allow_html=True)
+        # Delay distribution chart
+        if delay_col and len(dfp[delay_col].dropna()) > 0:
+            c1, c2 = st.columns(2)
+            with c1:
+                # BU-wise avg delay
+                if 'BU' in dfp.columns:
+                    bu_delay = dfp.groupby('BU')[delay_col].mean().reset_index().dropna()
+                    bu_delay.columns = ['BU', 'Avg Delay']
+                    if len(bu_delay) > 0:
+                        DARK = dict(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                                    font=dict(family="DM Sans", color="#888", size=13),
+                                    xaxis=dict(gridcolor="rgba(255,255,255,0.05)", tickcolor="#444", linecolor="#333"),
+                                    yaxis=dict(gridcolor="rgba(255,255,255,0.05)", tickcolor="#444", linecolor="#333"),
+                                    margin=dict(l=8, r=8, t=36, b=8))
+                        fig_d = go.Figure(go.Bar(
+                            x=bu_delay['BU'], y=bu_delay['Avg Delay'],
+                            marker_color=['#fc8181' if v > 30 else '#f6e05e' for v in bu_delay['Avg Delay']],
+                            marker_line_width=0,
+                            text=bu_delay['Avg Delay'].apply(lambda x: f'{x:.0f}d'),
+                            textposition='outside', textfont=dict(color='#888', size=12)
+                        ))
+                        fig_d.add_hline(y=30, line_dash='dash', line_color='#d69e2e',
+                                        annotation_text='30d', annotation_font_color='#d69e2e')
+                        fig_d.update_layout(**DARK, height=280,
+                                            title_text='Avg PR Revision Delay by BU (days)', showlegend=False)
+                        st.plotly_chart(fig_d, use_container_width=True)
 
-        # Full table
-        st.markdown("**All Ongoing POs**")
-        # Format date columns for display
-        display_df = df_ong_f.copy()
-        for col in display_df.columns:
-            if pd.api.types.is_datetime64_any_dtype(display_df[col]):
-                display_df[col] = display_df[col].dt.strftime("%d-%b-%Y")
-            elif pd.api.types.is_float_dtype(display_df[col]):
-                display_df[col] = display_df[col].apply(
-                    lambda x: f"{x:,.0f}" if pd.notna(x) and x != 0 else "")
-        st.dataframe(display_df, use_container_width=True,
-                     height=min(40*len(df_ong_f)+50, 600))
+            with c2:
+                # Category-wise count
+                if 'Category' in dfp.columns:
+                    cat_cnt = dfp['Category'].value_counts().head(10).reset_index()
+                    cat_cnt.columns = ['Category', 'Count']
+                    DARK2 = dict(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                                font=dict(family="DM Sans", color="#888", size=13),
+                                xaxis=dict(gridcolor="rgba(255,255,255,0.05)", tickcolor="#444", linecolor="#333"),
+                                yaxis=dict(gridcolor="rgba(255,255,255,0.05)", tickcolor="#444", linecolor="#333"),
+                                margin=dict(l=8, r=8, t=36, b=8))
+                    fig_c = go.Figure(go.Bar(
+                        y=cat_cnt['Category'], x=cat_cnt['Count'],
+                        orientation='h', marker_color='#e53e3e', marker_line_width=0,
+                        text=cat_cnt['Count'], textposition='outside',
+                        textfont=dict(color='#888', size=12)
+                    ))
+                    fig_c.update_layout(**DARK2, height=280,
+                                        title_text='Unclosed PRs by Category', showlegend=False)
+                    st.plotly_chart(fig_c, use_container_width=True)
+
+        # Full table with colour coding by delay
+        st.markdown(f"**All {len(dfp)} Unclosed PRs**")
+        disp_pr = dfp.copy()
+        for col in disp_pr.columns:
+            if pd.api.types.is_datetime64_any_dtype(disp_pr[col]):
+                disp_pr[col] = disp_pr[col].dt.strftime("%d-%b-%Y")
+        # Highlight rows with long delay
+        def hl_pr(row):
+            delay = row.get("PR Revision Delay (Days)", 0)
+            if pd.isna(delay) or delay == 0:
+                s = "background-color:#0d0d1a;color:#ccc;font-size:13px"
+            elif delay > 60:
+                s = "background-color:#2a0000;color:#ff9999;font-weight:bold;font-size:13px"
+            elif delay > 30:
+                s = "background-color:#1a1000;color:#ffcc66;font-size:13px"
+            else:
+                s = "background-color:#0d0d1a;color:#ccc;font-size:13px"
+            return [s] * len(row)
+        st.dataframe(disp_pr.style.apply(hl_pr, axis=1),
+                     use_container_width=True,
+                     height=min(40 * len(dfp) + 50, 700))
 
 # ── FOOTER ───────────────────────────────────────────────────────
 st.markdown(f"""
