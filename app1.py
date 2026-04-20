@@ -517,16 +517,6 @@ div[data-layout="wide"] {
 </style>
 """, unsafe_allow_html=True)
 
-# ── AUTO-REFRESH every 30 seconds ──────────────────────────────
-import streamlit.components.v1 as components_refresh
-components_refresh.html("""
-<script>
-setTimeout(function() {
-  window.parent.location.reload();
-}, 30000);
-</script>
-""", height=0)
-
 # ── NAV ──────────────────────────────────────────────────────────
 now = datetime.now().strftime("%d %b %Y %H:%M")
 st.markdown(f"""
@@ -1053,11 +1043,15 @@ with tab7:
                 df_ongoing[col] = pd.to_numeric(
                     df_ongoing[col].astype(str).str.replace(',','').str.replace('₹',''), errors='coerce').fillna(0)
 
-        # ── Delivery Status counts ──
-        n_ong_ongoing  = 0
-        n_ong_comp     = 0
-        if del_status:
-            n_ong_ongoing = len(df_ongoing[df_ongoing[del_status].str.strip().str.lower().isin(['ongoing','pending',''])])
+        # ── Delivery Status — infer from PO Yet to Deliver value ──
+        # Sheet has no Delivery Status col; use Yet to Deliver > 0 = ongoing
+        n_ong_ongoing = 0
+        n_ong_comp    = 0
+        if ytd_col and ytd_col in df_ongoing.columns:
+            n_ong_ongoing = int((df_ongoing[ytd_col] > 0).sum())
+            n_ong_comp    = int((df_ongoing[ytd_col] <= 0).sum())
+        elif del_status and del_status in df_ongoing.columns:
+            n_ong_ongoing = len(df_ongoing[df_ongoing[del_status].str.strip().str.lower().isin(['ongoing','pending'])])
             n_ong_comp    = len(df_ongoing[df_ongoing[del_status].str.strip().str.lower().isin(['completed','shortclose'])])
 
         # ── Totals ──
