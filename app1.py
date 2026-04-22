@@ -204,6 +204,28 @@ if df_po.empty:
     st.error(f"Sheet error: {po_err}")
     st.stop()
 
+# DEBUG: Show raw data info (remove after fixing)
+with st.expander("DEBUG: Raw Data Info (click to expand)"):
+    st.write(f"**Sheet tab found:** {len(df_po)} total rows")
+    st.write(f"**Columns ({len(df_po.columns)}):** {list(df_po.columns)}")
+    # Show first 5 rows with key columns
+    key_cols = [c for c in df_po.columns if any(x in c.lower() for x in ['sn','bu','pr dt','po dt','po basic','delivery status','current status'])]
+    if key_cols:
+        st.write(f"**Key columns found:** {key_cols}")
+        st.dataframe(df_po[key_cols].head(20), use_container_width=True)
+    # Count PO dates
+    for c in df_po.columns:
+        if 'po' in c.lower() and ('dt' in c.lower() or 'date' in c.lower()):
+            non_empty = df_po[c].astype(str).str.strip().replace('','<empty>').replace('nan','<nan>').replace('NaT','<NaT>')
+            filled = len(df_po[~df_po[c].astype(str).str.strip().isin(['','nan','NaT','None'])])
+            st.write(f"**Column '{c}':** {filled} non-empty values out of {len(df_po)}")
+            st.write(f"  Sample values: {df_po[c].head(15).tolist()}")
+    # Count PR dates  
+    for c in df_po.columns:
+        if 'pr' in c.lower() and 'dt' in c.lower() and 'rev' not in c.lower() and 'po' not in c.lower():
+            filled = len(df_po[~df_po[c].astype(str).str.strip().isin(['','nan','NaT','None'])])
+            st.write(f"**Column '{c}':** {filled} non-empty values out of {len(df_po)}")
+
 # ── Columns ──────────────────────────────────────────────────
 C_PO_VAL  = fcol(df_po,'po','basic','value') or 'PO Basic Value'
 C_SAV     = fcol(df_po,'savings','value') or fcol(df_po,'saving') or 'Savings Value'
