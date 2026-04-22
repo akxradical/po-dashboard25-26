@@ -249,9 +249,16 @@ sp = (sav/spend*100) if spend>0 else 0
 tat_v = pd.to_numeric(dff[C_TAT],errors='coerce').dropna() if C_TAT in dff.columns else pd.Series()
 avg_tat = float(tat_v[tat_v>0].mean()) if len(tat_v[tat_v>0])>0 else 0
 
-comp = dff[dff[C_DEL_ST].str.strip().str.lower().isin(['completed','shortclose'])] if C_DEL_ST in dff.columns else pd.DataFrame()
-n_comp = len(comp)
-n_ong_po = len(dff[dff[C_DEL_ST].str.strip().str.lower()=='ongoing']) if C_DEL_ST in dff.columns else 0
+# Convert Delivery Status to string first (some cells may be numeric/empty)
+if C_DEL_ST in dff.columns:
+    dff[C_DEL_ST] = dff[C_DEL_ST].astype(str).str.strip().str.lower()
+    comp = dff[dff[C_DEL_ST].isin(['completed','shortclose'])]
+    n_comp = len(comp)
+    n_ong_po = len(dff[dff[C_DEL_ST]=='ongoing'])
+else:
+    comp = pd.DataFrame()
+    n_comp = 0
+    n_ong_po = 0
 
 otif_pct=0; otif_n=0
 if C_OTIF in dff.columns and len(comp)>0:
@@ -439,7 +446,8 @@ with t6:
         mf['_days']=pd.to_numeric(mf[dc].astype(str).str.replace(',',''),errors='coerce')
         # Only ongoing
         if C_DEL_ST in mf.columns:
-            mf=mf[~mf[C_DEL_ST].str.strip().str.lower().isin(['completed','shortclose'])]
+            mf[C_DEL_ST]=mf[C_DEL_ST].astype(str).str.strip().str.lower()
+            mf=mf[~mf[C_DEL_ST].isin(['completed','shortclose'])]
         mf=mf.dropna(subset=['_mfc','_days']);mf=mf[mf['_days']>0]
         if mf.empty:
             st.info("No ongoing POs with valid MFC data.")
