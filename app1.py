@@ -45,16 +45,20 @@ def load_po_tracker():
         if len(data)<2: return pd.DataFrame(), "Empty sheet"
         df = pd.DataFrame(data[1:], columns=[c.strip() for c in data[0]])
         df = df[df.apply(lambda r: any(str(v).strip() for v in r), axis=1)].copy()
-        # Parse dates — only if column contains string values
+        # Parse dates
         for c in df.columns:
             if any(x in c.lower() for x in ['dt.','dt ','date']):
-                if df[c].dtype == object:  # only parse string columns
-                    df[c] = pd.to_datetime(df[c], errors='coerce', dayfirst=True)
-        # Parse numbers — skip date columns
+                df[c] = pd.to_datetime(df[c].astype(str), errors='coerce', dayfirst=True)
+        # Parse numbers — only columns with financial/numeric keywords
+        num_keywords = ['value','gst','saving','tat','time from mfc','otif','delivered','yet to be']
+        date_keywords = ['dt.','dt ','date']
         for c in df.columns:
-            if any(x in c.lower() for x in ['value','gst','saving','tat','time from mfc','otif']):
-                if not pd.api.types.is_datetime64_any_dtype(df[c]):
-                    df[c] = pd.to_numeric(df[c].astype(str).str.replace(',','').str.replace('%',''), errors='coerce')
+            cl = c.lower()
+            # Skip if it's a date column
+            if any(x in cl for x in date_keywords):
+                continue
+            if any(x in cl for x in num_keywords):
+                df[c] = pd.to_numeric(df[c].astype(str).str.replace(',','').str.replace('%',''), errors='coerce')
         # PR-PO TAT
         tat_col = next((c for c in df.columns if 'pr' in c.lower() and 'po' in c.lower() and 'tat' in c.lower()), None)
         if tat_col: df[tat_col] = pd.to_numeric(df[tat_col], errors='coerce')
@@ -354,8 +358,11 @@ with t2:
     c1,c2=st.columns(2)
     with c1:
         if C_PO_DT in dff_po.columns and len(dff_po)>0:
-            dff2=dff_po.copy();dff2['M']=dff2[C_PO_DT].dt.strftime("%b'%y")
-            if 'M' in dff2.columns:
+            dff2=dff_po.copy()
+            dff2['_pod']=pd.to_datetime(dff2[C_PO_DT].astype(str),errors='coerce',dayfirst=True)
+            dff2=dff2[dff2['_pod'].notna()]
+            dff2['M']=dff2['_pod'].dt.strftime("%b'%y")
+            if 'M' in dff2.columns and len(dff2)>0:
                 mo=dff2.groupby('M').agg(s=(C_PO_VAL,'sum'),sv=(C_SAV,'sum')).reset_index()
                 mo['sc']=mo['s']/1e7;mo['svc']=mo['sv']/1e7
                 fig3=go.Figure()
