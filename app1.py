@@ -37,7 +37,7 @@ def load_po_tracker():
         gc = gclient()
         sh = gc.open_by_key(SHEET_ID)
         ws = None
-        for tab in ["PO TRACKER ' 27","PO TRACKER '27","PO TRACKER"]:
+        for tab in ["PO TRACKER ' 27","PO TRACKER ’ 27","PO TRACKER '27","PO TRACKER ‘27","PO TRACKER"]:
             try: ws = sh.worksheet(tab); break
             except: continue
         if not ws: return pd.DataFrame(), f"Tab not found. Available: {[s.title for s in sh.worksheets()]}"
@@ -45,14 +45,16 @@ def load_po_tracker():
         if len(data)<2: return pd.DataFrame(), "Empty sheet"
         df = pd.DataFrame(data[1:], columns=[c.strip() for c in data[0]])
         df = df[df.apply(lambda r: any(str(v).strip() for v in r), axis=1)].copy()
-        # Parse dates
+        # Parse dates — only if column contains string values
         for c in df.columns:
             if any(x in c.lower() for x in ['dt.','dt ','date']):
-                df[c] = pd.to_datetime(df[c], errors='coerce', dayfirst=True)
-        # Parse numbers
+                if df[c].dtype == object:  # only parse string columns
+                    df[c] = pd.to_datetime(df[c], errors='coerce', dayfirst=True)
+        # Parse numbers — skip date columns
         for c in df.columns:
             if any(x in c.lower() for x in ['value','gst','saving','tat','time from mfc','otif']):
-                df[c] = pd.to_numeric(df[c].astype(str).str.replace(',','').str.replace('%',''), errors='coerce')
+                if not pd.api.types.is_datetime64_any_dtype(df[c]):
+                    df[c] = pd.to_numeric(df[c].astype(str).str.replace(',','').str.replace('%',''), errors='coerce')
         # PR-PO TAT
         tat_col = next((c for c in df.columns if 'pr' in c.lower() and 'po' in c.lower() and 'tat' in c.lower()), None)
         if tat_col: df[tat_col] = pd.to_numeric(df[tat_col], errors='coerce')
@@ -242,38 +244,52 @@ if sel_buyer!='All' and 'Handled by' in dff.columns: dff=dff[dff['Handled by']==
 if sel_st!='All' and C_STYPE in dff.columns: dff=dff[dff[C_STYPE]==sel_st]
 
 # ── KPIs ─────────────────────────────────────────────────────
-n_po = len(dff[dff[C_PO_VAL]>0]) if C_PO_VAL in dff.columns else len(dff)
-spend = dff[C_PO_VAL].sum()/1e7 if C_PO_VAL in dff.columns else 0
-sav = dff[C_SAV].sum()/1e7 if C_SAV in dff.columns else 0
+# Total PRs = rows with PR Dt filled (not empty rows at bottom)
+C_PR_DT_col = fcol(dff,'pr','dt')
+C_PO_DT_col = fcol(dff,'po','dt') or fcol(dff,'po','date')
+
+pr_dt_vals = pd.to_datetime(dff[C_PR_DT_col].astype(str), errors='coerce', dayfirst=True) if C_PR_DT_col and C_PR_DT_col in dff.columns else pd.Series(dtype='datetime64[ns]')
+po_dt_vals = pd.to_datetime(dff[C_PO_DT_col].astype(str), errors='coerce', dayfirst=True) if C_PO_DT_col and C_PO_DT_col in dff.columns else pd.Series(dtype='datetime64[ns]')
+
+# Real rows = PR date filled (ignores empty rows at bottom of sheet)
+dff = dff[pr_dt_vals.notna()].copy() if pr_dt_vals.notna().any() else dff
+total_prs = len(dff)
+
+# POs = rows where PO date is filled
+dff_po = dff[po_dt_vals[pr_dt_vals.notna()].notna()].copy() if po_dt_vals.notna().any() else pd.DataFrame()
+n_po = len(dff_po)
+n_pr_open = total_prs - n_po  # PRs with no PO date yet
+spend = dff_po[C_PO_VAL].sum()/1e7 if C_PO_VAL in dff_po.columns else 0
+sav = dff_po[C_SAV].sum()/1e7 if C_SAV in dff_po.columns else 0
 sp = (sav/spend*100) if spend>0 else 0
-tat_v = pd.to_numeric(dff[C_TAT],errors='coerce').dropna() if C_TAT in dff.columns else pd.Series()
+tat_v = pd.to_numeric(dff_po[C_TAT],errors='coerce').dropna() if C_TAT in dff_po.columns else pd.Series()
 avg_tat = float(tat_v[tat_v>0].mean()) if len(tat_v[tat_v>0])>0 else 0
 
-# Convert Delivery Status to string first (some cells may be numeric/empty)
-if C_DEL_ST in dff.columns:
-    dff[C_DEL_ST] = dff[C_DEL_ST].astype(str).str.strip().str.lower()
-    comp = dff[dff[C_DEL_ST].isin(['completed','shortclose'])]
+# Delivery Status — only for rows that have PO dates
+if C_DEL_ST in dff_po.columns:
+    dff_po[C_DEL_ST] = dff_po[C_DEL_ST].fillna('').astype(str).str.strip().str.lower()
+    comp = dff_po[dff_po[C_DEL_ST].isin(['completed','shortclose'])]
     n_comp = len(comp)
-    n_ong_po = len(dff[dff[C_DEL_ST]=='ongoing'])
+    n_ong_po = len(dff_po[dff_po[C_DEL_ST]=='ongoing'])
 else:
     comp = pd.DataFrame()
     n_comp = 0
     n_ong_po = 0
 
 otif_pct=0; otif_n=0
-if C_OTIF in dff.columns and len(comp)>0:
+if C_OTIF in dff_po.columns and len(comp)>0:
     ov=pd.to_numeric(comp[C_OTIF].astype(str).str.replace('%','').str.replace(',',''),errors='coerce').dropna()
     ov=ov[ov>0]; otif_n=len(ov)
     if otif_n>0: otif_pct=(ov<=105.0).sum()/otif_n*100
 
 nv_pct=nv_n=0
-if C_STYPE in dff.columns:
-    nm=dff[C_STYPE].str.upper().str.contains('NV',na=False)
-    nv_n=int(nm.sum()); nv_pct=(nv_n/len(dff)*100) if len(dff)>0 else 0
+if C_STYPE in dff_po.columns:
+    nm=dff_po[C_STYPE].fillna('').astype(str).str.upper().str.contains('NV',na=False)
+    nv_n=int(nm.sum()); nv_pct=(nv_n/len(dff_po)*100) if len(dff_po)>0 else 0
 
 wce=None
-if '_PayScore' in dff.columns and C_PO_VAL in dff.columns:
-    sc=dff[dff['_PayScore'].notna()&(dff[C_PO_VAL]>0)]
+if '_PayScore' in dff_po.columns and C_PO_VAL in dff_po.columns:
+    sc=dff_po[dff_po['_PayScore'].notna()&(dff_po[C_PO_VAL]>0)]
     if len(sc)>0: wce=(sc['_PayScore']*sc[C_PO_VAL]).sum()/sc[C_PO_VAL].sum()
 
 # ── Chart theme ──────────────────────────────────────────────
@@ -296,7 +312,7 @@ with t1:
     cn=dff['Category'].nunique() if 'Category' in dff.columns else 0
     sn=dff['Supplier Name'].nunique() if 'Supplier Name' in dff.columns else 0
     st.markdown(f"""<div class="kG k5">
-{kc(str(n_po),"Total POs","FY 26-27","","","cB")}
+{kc(str(n_po),"POs Placed",f"{total_prs} PRs raised | {n_pr_open} open","","","cB")}
 {kc(f"Rs {spend:.1f} Cr","Total Spend","PO Basic Value","","","cG")}
 {kc(f"Rs {sav:.2f} Cr","Savings",f"{sp:.1f}%","Above 4.5%" if sp>=4.5 else "Below 4.5%","up" if sp>=4.5 else "wn","cG" if sp>=4.5 else "cA")}
 {kc(f"{avg_tat:.0f}d","Avg PR-PO TAT","Target: 90d","On track" if avg_tat<=90 else "Above target","up" if avg_tat<=90 else "dn","cG" if avg_tat<=90 else "cR")}
@@ -310,7 +326,7 @@ with t1:
 
     c1,c2=st.columns(2)
     with c1:
-        bg=dff.groupby('BU').agg(s=(C_PO_VAL,'sum'),sv=(C_SAV,'sum')).reset_index() if C_PO_VAL in dff.columns else pd.DataFrame()
+        bg=dff_po.groupby('BU').agg(s=(C_PO_VAL,'sum'),sv=(C_SAV,'sum')).reset_index() if C_PO_VAL in dff_po.columns and len(dff_po)>0 else pd.DataFrame()
         if not bg.empty:
             bg['sc']=bg['s']/1e7;bg['svc']=bg['sv']/1e7
             fig=go.Figure()
@@ -320,8 +336,8 @@ with t1:
                 legend=dict(orientation='h',y=1.12,x=1,xanchor='right',bgcolor='rgba(0,0,0,0)',font=dict(color='#888',size=11)))
             st.plotly_chart(fig,use_container_width=True)
     with c2:
-        if 'Category' in dff.columns and C_PO_VAL in dff.columns:
-            cg=dff.groupby('Category')[C_PO_VAL].sum().sort_values(ascending=False).head(8).reset_index()
+        if 'Category' in dff_po.columns and C_PO_VAL in dff_po.columns and len(dff_po)>0:
+            cg=dff_po.groupby('Category')[C_PO_VAL].sum().sort_values(ascending=False).head(8).reset_index()
             cg['sc']=cg[C_PO_VAL]/1e7
             fig2=go.Figure(go.Bar(y=cg['Category'],x=cg['sc'],orientation='h',marker_color=R,marker_line_width=0,
                 text=cg['sc'].apply(lambda x:f'Rs {x:.1f}Cr'),textposition='outside',textfont=dict(color='#888',size=11)))
@@ -337,8 +353,8 @@ with t2:
     with c4: st.metric("Completed / Ongoing",f"{n_comp} / {n_ong_po}")
     c1,c2=st.columns(2)
     with c1:
-        if C_PO_DT in dff.columns:
-            dff2=dff.copy();dff2['M']=dff2[C_PO_DT].dt.strftime("%b'%y")
+        if C_PO_DT in dff_po.columns and len(dff_po)>0:
+            dff2=dff_po.copy();dff2['M']=dff2[C_PO_DT].dt.strftime("%b'%y")
             if 'M' in dff2.columns:
                 mo=dff2.groupby('M').agg(s=(C_PO_VAL,'sum'),sv=(C_SAV,'sum')).reset_index()
                 mo['sc']=mo['s']/1e7;mo['svc']=mo['sv']/1e7
@@ -352,7 +368,7 @@ with t2:
                     legend=dict(orientation='h',y=1.12,x=1,xanchor='right',bgcolor='rgba(0,0,0,0)',font=dict(color='#888',size=11)))
                 st.plotly_chart(fig3,use_container_width=True)
     with c2:
-        bs=dff.groupby('BU').agg(s=(C_PO_VAL,'sum'),sv=(C_SAV,'sum'),n=(C_PO_VAL,'count')).reset_index() if C_PO_VAL in dff.columns else pd.DataFrame()
+        bs=dff_po.groupby('BU').agg(s=(C_PO_VAL,'sum'),sv=(C_SAV,'sum'),n=(C_PO_VAL,'count')).reset_index() if C_PO_VAL in dff_po.columns and len(dff_po)>0 else pd.DataFrame()
         if not bs.empty:
             bs['sp']=(bs['sv']/bs['s']*100).fillna(0)
             rows=""
@@ -370,8 +386,8 @@ with t3:
     with c4: st.metric("Ongoing",str(n_ong_po))
     c1,c2=st.columns(2)
     with c1:
-        if C_TAT in dff.columns:
-            bt=dff.groupby('BU').apply(lambda x:pd.to_numeric(x[C_TAT],errors='coerce').mean()).reset_index()
+        if C_TAT in dff_po.columns and len(dff_po)>0:
+            bt=dff_po.groupby('BU').apply(lambda x:pd.to_numeric(x[C_TAT],errors='coerce').mean()).reset_index()
             bt.columns=['BU','TAT'];bt=bt.dropna()
             if len(bt)>0:
                 fig4=go.Figure(go.Bar(x=bt['BU'],y=bt['TAT'],
@@ -414,12 +430,12 @@ with t4:
 
 # ════ TAB 5: NVD ═════════════════════════════════
 with t5:
-    if C_STYPE in dff.columns:
+    if C_STYPE in dff_po.columns and len(dff_po)>0:
         c1,c2,c3=st.columns(3)
         with c1: st.metric("NVD %",f"{nv_pct:.1f}%","On target" if 10<=nv_pct<=15 else "Off target")
         with c2: st.metric("NV POs",str(nv_n))
         with c3: st.metric("AVL POs",str(int(dff[C_STYPE].str.upper().str.contains('AVL',na=False).sum())))
-        bn=dff.groupby('BU').apply(lambda x:pd.Series({
+        bn=dff_po.groupby('BU').apply(lambda x:pd.Series({
             'Total':len(x),'NV':x[C_STYPE].str.upper().str.contains('NV',na=False).sum()})).reset_index()
         bn['NV%']=(bn['NV']/bn['Total']*100).fillna(0)
         fig8=go.Figure(go.Bar(x=bn['BU'],y=bn['NV%'],
@@ -446,7 +462,7 @@ with t6:
         mf['_days']=pd.to_numeric(mf[dc].astype(str).str.replace(',',''),errors='coerce')
         # Only ongoing
         if C_DEL_ST in mf.columns:
-            mf[C_DEL_ST]=mf[C_DEL_ST].astype(str).str.strip().str.lower()
+            mf[C_DEL_ST]=mf[C_DEL_ST].fillna('').astype(str).str.strip().str.lower()
             mf=mf[~mf[C_DEL_ST].isin(['completed','shortclose'])]
         mf=mf.dropna(subset=['_mfc','_days']);mf=mf[mf['_days']>0]
         if mf.empty:
@@ -535,25 +551,40 @@ with t7:
 with t8:
     st.markdown("### PR Not Yet Converted to PO")
     # From PO TRACKER: rows where PO Dt is empty = PR raised but no PO yet
-    if C_PO_DT in df_po.columns:
-        unclosed=df_po[df_po[C_PO_DT].isna()].copy()
+    # PR Unclosed = rows where PR Date exists but PO Date is empty
+    pr_col_uc = fcol(df_po,'pr','dt')
+    po_col_uc = fcol(df_po,'po','dt') or fcol(df_po,'po','date')
+    if pr_col_uc and po_col_uc and pr_col_uc in df_po.columns and po_col_uc in df_po.columns:
+        pr_dates_uc = pd.to_datetime(df_po[pr_col_uc].astype(str), errors='coerce', dayfirst=True)
+        po_dates_uc = pd.to_datetime(df_po[po_col_uc].astype(str), errors='coerce', dayfirst=True)
+        # Has PR date but NO PO date = unclosed
+        unclosed = df_po[pr_dates_uc.notna() & po_dates_uc.isna()].copy()
     else:
-        unclosed=pd.DataFrame()
+        unclosed = pd.DataFrame()
     if unclosed.empty:
         st.info("No unclosed PRs found (all PRs have PO dates).")
     else:
         # PR revision delay
+        unclosed['_rev_delay'] = np.nan
         if C_PR_DT in unclosed.columns and C_REV_PR in unclosed.columns:
-            unclosed['_rev_delay']=(unclosed[C_REV_PR]-unclosed[C_PR_DT]).dt.days
-        else:
-            unclosed['_rev_delay']=np.nan
+            try:
+                pr_dates  = pd.to_datetime(unclosed[C_PR_DT].astype(str), errors='coerce', dayfirst=True)
+                rev_dates = pd.to_datetime(unclosed[C_REV_PR].astype(str), errors='coerce', dayfirst=True)
+                unclosed['_rev_delay'] = (rev_dates - pr_dates).dt.days
+            except Exception:
+                pass  # skip if date math fails
         n_total=len(unclosed)
         n_rev=int(unclosed[C_REV_PR].notna().sum()) if C_REV_PR in unclosed.columns else 0
         avg_d=float(unclosed['_rev_delay'].dropna().mean()) if unclosed['_rev_delay'].notna().any() else 0
         max_d=float(unclosed['_rev_delay'].dropna().max()) if unclosed['_rev_delay'].notna().any() else 0
         # Days since PR raised
+        unclosed['_age'] = np.nan
         if C_PR_DT in unclosed.columns:
-            unclosed['_age']=(pd.Timestamp(date.today())-unclosed[C_PR_DT]).dt.days
+            try:
+                pr_dt_parsed = pd.to_datetime(unclosed[C_PR_DT].astype(str), errors='coerce', dayfirst=True)
+                unclosed['_age'] = (pd.Timestamp(date.today()) - pr_dt_parsed).dt.days
+            except Exception:
+                pass
         c1,c2,c3,c4=st.columns(4)
         with c1: st.metric("Unclosed PRs",str(n_total))
         with c2: st.metric("PRs Revised",str(n_rev),f"{n_total-n_rev} unrevised")
