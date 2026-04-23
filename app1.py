@@ -20,7 +20,7 @@ import numpy as np
 from datetime import datetime, date
 from google.oauth2.service_account import Credentials
 import gspread
-import streamlit.components.v1 as components
+
 
 st.set_page_config(
     page_title="Zetwerk CPT Dashboard",
@@ -100,10 +100,16 @@ def load_po_tracker():
 
         # ── Parse dates ──────────────────────────────────────
         # FORMATTED_VALUE returns dates as display strings e.g. "07/02/2025", "07-Feb-2025"
-        # pandas to_datetime with dayfirst=True handles both DD/MM/YYYY and DD-Mon-YYYY
+        # Try DD/MM/YYYY first, fall back to mixed format (suppresses pandas warning)
         date_cols = [c for c in df.columns if any(x in c.lower() for x in ['dt.', 'dt ', ' dt', 'date'])]
         for c in date_cols:
-            df[c] = pd.to_datetime(df[c].astype(str).str.strip(), errors='coerce', dayfirst=True)
+            raw = df[c].astype(str).str.strip()
+            parsed = pd.to_datetime(raw, format='%d/%m/%Y', errors='coerce')
+            # fill in anything that didn't parse (e.g. "07-Feb-2025" or blank)
+            mask = parsed.isna() & raw.ne('') & raw.ne('nan') & raw.ne('None')
+            if mask.any():
+                parsed[mask] = pd.to_datetime(raw[mask], format='mixed', dayfirst=True, errors='coerce')
+            df[c] = parsed
 
         # ── Parse numeric columns ────────────────────────────
         # Only columns that should be numeric (value, savings, TAT, OTIF, delivered, etc.)
@@ -188,7 +194,12 @@ def load_ongoing():
         # Parse dates
         for c in df.columns:
             if any(x in c.lower() for x in ['date', 'dt']):
-                df[c] = pd.to_datetime(df[c], errors='coerce', dayfirst=True)
+                raw = df[c].astype(str).str.strip()
+                parsed = pd.to_datetime(raw, format='%d/%m/%Y', errors='coerce')
+                mask = parsed.isna() & raw.ne('') & raw.ne('nan') & raw.ne('None')
+                if mask.any():
+                    parsed[mask] = pd.to_datetime(raw[mask], format='mixed', dayfirst=True, errors='coerce')
+                df[c] = parsed
 
         return df, None
 
@@ -612,7 +623,7 @@ with t1:
                               title_text='Spend & Savings by BU (Rs Cr)',
                               legend=dict(orientation='h', y=1.12, x=1, xanchor='right',
                                           bgcolor='rgba(0,0,0,0)', font=dict(color='#888', size=11)))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         else:
             st.markdown('<div class="st-inf">No PO data for spend chart.</div>', unsafe_allow_html=True)
 
@@ -627,7 +638,7 @@ with t1:
                 textposition='outside', textfont=dict(color='#888', size=11)
             ))
             fig2.update_layout(**DK, height=280, title_text='Top Categories by Spend')
-            st.plotly_chart(fig2, use_container_width=True)
+            st.plotly_chart(fig2, width='stretch')
         else:
             # Show category distribution of PRs instead
             if C_CATEGORY and C_CATEGORY in dff.columns:
@@ -640,7 +651,7 @@ with t1:
                     textfont=dict(color='#888', size=11)
                 ))
                 fig2.update_layout(**DK, height=280, title_text='PRs by Category (all)')
-                st.plotly_chart(fig2, use_container_width=True)
+                st.plotly_chart(fig2, width='stretch')
 
     # Pipeline funnel
     st.markdown("#### Procurement Pipeline")
@@ -702,7 +713,7 @@ with t2:
                 legend=dict(orientation='h', y=1.12, x=1, xanchor='right',
                             bgcolor='rgba(0,0,0,0)', font=dict(color='#888', size=11))
             )
-            st.plotly_chart(fig3, use_container_width=True)
+            st.plotly_chart(fig3, width='stretch')
         else:
             st.markdown('<div class="st-inf">Monthly trend available once more POs are placed.</div>', unsafe_allow_html=True)
 
@@ -745,7 +756,7 @@ with t2:
                               annotation_text='4.5%', annotation_font_color=CLR_AMBER)
             fig_cat.update_layout(**DK, height=260, title_text='Savings % by Category',
                                   showlegend=False)
-            st.plotly_chart(fig_cat, use_container_width=True)
+            st.plotly_chart(fig_cat, width='stretch')
 
 
 # ════ TAB 3: TAT & OTIF ════════════════════════════════════
@@ -788,7 +799,7 @@ with t3:
                 fig4.add_hline(y=90, line_dash='dash', line_color=CLR_AMBER,
                                annotation_text='90d target', annotation_font_color=CLR_AMBER)
                 fig4.update_layout(**DK, height=280, title_text='Avg TAT by BU', showlegend=False)
-                st.plotly_chart(fig4, use_container_width=True)
+                st.plotly_chart(fig4, width='stretch')
             else:
                 st.markdown('<div class="st-inf">TAT data available once POs are placed.</div>', unsafe_allow_html=True)
         else:
@@ -810,7 +821,7 @@ with t3:
                                   annotation_text='90d', annotation_font_color=CLR_AMBER)
                 fig_tat.update_layout(**DK, height=280, title_text='TAT Distribution (days)',
                                       showlegend=False)
-                st.plotly_chart(fig_tat, use_container_width=True)
+                st.plotly_chart(fig_tat, width='stretch')
         else:
             # Show PR pipeline aging instead
             if C_PR_DT and C_PR_DT in df_unclosed.columns and len(df_unclosed) > 0:
@@ -828,7 +839,7 @@ with t3:
                     fig_age.update_layout(**DK, height=280,
                                           title_text='Unclosed PR Age Distribution (days)',
                                           showlegend=False)
-                    st.plotly_chart(fig_age, use_container_width=True)
+                    st.plotly_chart(fig_age, width='stretch')
 
     # OTIF by BU (only if completions exist)
     if n_completed > 0 and C_OTIF and C_OTIF in df_completed.columns:
@@ -852,7 +863,7 @@ with t3:
                            annotation_text='75% target', annotation_font_color=CLR_AMBER)
             fig5.update_layout(**DK, height=260, title_text='OTIF % by BU',
                                showlegend=False, yaxis_range=[0, 115])
-            st.plotly_chart(fig5, use_container_width=True)
+            st.plotly_chart(fig5, width='stretch')
     else:
         st.markdown('<div class="st-inf" style="margin-top:12px;">OTIF will be calculated once deliveries are completed (Delivery Status = Completed).</div>', unsafe_allow_html=True)
 
@@ -893,7 +904,7 @@ with t4:
                 ))
                 fig_pt.update_layout(**DK, height=300, title_text='Payment Terms Distribution',
                                      showlegend=False)
-                st.plotly_chart(fig_pt, use_container_width=True)
+                st.plotly_chart(fig_pt, width='stretch')
 
         # Score distribution
         if '_PayScore' in wcs_df.columns and len(wcs_df) > 0:
@@ -914,7 +925,7 @@ with t4:
             ))
             fig_sc.update_layout(**DK, height=260, title_text='WC Score Breakdown by Term',
                                  showlegend=False)
-            st.plotly_chart(fig_sc, use_container_width=True)
+            st.plotly_chart(fig_sc, width='stretch')
     else:
         if n_pos == 0:
             st.markdown('<div class="st-inf">Working capital data will be available once POs are placed with payment terms.</div>', unsafe_allow_html=True)
@@ -960,7 +971,7 @@ with t5:
             ymax = max(float(bn['NV%'].max()) * 1.3, 20) if len(bn) > 0 else 20
             fig8.update_layout(**DK, height=280, title_text='NVD % by BU',
                                showlegend=False, yaxis_range=[0, ymax])
-            st.plotly_chart(fig8, use_container_width=True)
+            st.plotly_chart(fig8, width='stretch')
 
         with c2:
             # Supplier type pie
@@ -982,7 +993,7 @@ with t5:
                     title_text='Supplier Type Mix',
                     legend=dict(font=dict(color='#888', size=11), bgcolor='rgba(0,0,0,0)')
                 )
-                st.plotly_chart(fig_pie, use_container_width=True)
+                st.plotly_chart(fig_pie, width='stretch')
     else:
         if n_pos == 0:
             st.markdown('<div class="st-inf">Supplier type data will populate once POs are placed.</div>', unsafe_allow_html=True)
@@ -1080,7 +1091,7 @@ border:{"2" if sel_mfc else "1"}px solid {color};border-radius:10px;padding:10px
                 return [s] * len(row)
 
             st.markdown(f"**{len(ds)} POs**")
-            st.dataframe(ds.style.apply(hl_mfc, axis=1), use_container_width=True,
+            st.dataframe(ds.style.apply(hl_mfc, axis=1), width='stretch',
                          height=min(40 * len(ds) + 60, 700))
 
 
@@ -1151,7 +1162,7 @@ with t7:
         for c in disp_o.columns:
             if pd.api.types.is_datetime64_any_dtype(disp_o[c]):
                 disp_o[c] = disp_o[c].dt.strftime("%d-%b-%Y")
-        st.dataframe(disp_o, use_container_width=True, height=min(40 * len(dfo) + 50, 600))
+        st.dataframe(disp_o, width='stretch', height=min(40 * len(dfo) + 50, 600))
 
 
 # ════ TAB 8: PR-PO UNCLOSED ═══════════════════════════════
@@ -1220,7 +1231,7 @@ with t8:
                 textfont=dict(color='#888', size=11)
             ))
             fig_pr1.update_layout(**DK, height=260, title_text='Unclosed PRs by BU', showlegend=False)
-            st.plotly_chart(fig_pr1, use_container_width=True)
+            st.plotly_chart(fig_pr1, width='stretch')
 
         with c2:
             if C_CUR_ST and C_CUR_ST in dfp.columns:
@@ -1233,7 +1244,7 @@ with t8:
                     textfont=dict(color='#888', size=11)
                 ))
                 fig_pr2.update_layout(**DK, height=260, title_text='By Current Status', showlegend=False)
-                st.plotly_chart(fig_pr2, use_container_width=True)
+                st.plotly_chart(fig_pr2, width='stretch')
 
         # Age buckets
         if dfp['_age'].notna().any():
@@ -1251,7 +1262,7 @@ with t8:
                 textfont=dict(color='#888', size=11)
             ))
             fig_age2.update_layout(**DK, height=240, title_text='PR Age Distribution', showlegend=False)
-            st.plotly_chart(fig_age2, use_container_width=True)
+            st.plotly_chart(fig_age2, width='stretch')
 
         # Table
         show_cols = [c for c in ['SN', C_BU, 'Project Name', 'Items', C_CATEGORY, C_HANDLER,
@@ -1275,7 +1286,7 @@ with t8:
             return [s] * len(row)
 
         st.markdown(f"**{len(ds)} unclosed PRs**")
-        st.dataframe(ds.style.apply(hl_pr, axis=1), use_container_width=True,
+        st.dataframe(ds.style.apply(hl_pr, axis=1), width='stretch',
                      height=min(40 * len(ds) + 50, 700))
 
 
@@ -1287,77 +1298,27 @@ display:flex;justify-content:space-between;">
 </div>''', unsafe_allow_html=True)
 
 
-# ════ CAT 2 BUDDY (floating chatbot) ══════════════════════
-chat_html = ""
-for m in st.session_state.buddy_msgs[-10:]:
-    if m['role'] == 'user':
-        chat_html += f'<div style="background:rgba(229,62,62,.12);border:1px solid rgba(229,62,62,.2);border-radius:10px 10px 2px 10px;padding:8px 12px;margin:4px 0;font-size:12px;color:#eee;max-width:85%;align-self:flex-end;margin-left:auto;">{m["text"]}</div>'
-    else:
-        chat_html += f'<div style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);border-radius:10px 10px 10px 2px;padding:8px 12px;margin:4px 0;font-size:12px;color:#ccc;max-width:90%;">{m["text"]}</div>'
+# ════ CAT 2 BUDDY — native Streamlit chat ═════════════════════
+st.markdown("""<div style="margin-top:24px;border-top:1px solid rgba(255,255,255,.06);padding-top:12px;">
+<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+  <div style="width:28px;height:28px;background:linear-gradient(135deg,#e53e3e,#fc4f4f);border-radius:7px;
+  display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;color:white;">C</div>
+  <span style="font-size:13px;font-weight:700;color:#eee;">CAT 2 Buddy</span>
+  <span style="font-size:10px;color:#38a169;">● Online</span>
+</div></div>""", unsafe_allow_html=True)
 
-buddy_open = st.session_state.get('buddy_open', False)
-components.html(f"""<!DOCTYPE html><html><head><style>
-*{{margin:0;padding:0;box-sizing:border-box;font-family:'DM Sans',Arial,sans-serif;}}
-body{{background:transparent;overflow:visible;height:auto;}}
-#fab{{position:fixed;bottom:20px;right:20px;z-index:9999;width:52px;height:52px;border-radius:50%;
-background:linear-gradient(135deg,#e53e3e,#fc4f4f);display:flex;align-items:center;justify-content:center;
-cursor:pointer;box-shadow:0 4px 20px rgba(229,62,62,.5);font-size:22px;border:none;color:white;}}
-#fab:hover{{transform:scale(1.1);transition:transform 0.15s;}}
-#panel{{position:fixed;bottom:82px;right:20px;z-index:9998;width:340px;background:#13131a;
-border:1px solid rgba(229,62,62,.3);border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,.8);
-display:{'flex' if buddy_open else 'none'};flex-direction:column;overflow:hidden;}}
-#hdr{{background:linear-gradient(135deg,#1a0505,#220808);border-bottom:1px solid rgba(229,62,62,.2);
-padding:12px 16px;display:flex;align-items:center;gap:10px;}}
-#av{{width:34px;height:34px;background:linear-gradient(135deg,#e53e3e,#fc4f4f);border-radius:9px;
-display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:900;color:white;}}
-#msgs{{padding:12px;display:flex;flex-direction:column;height:260px;overflow-y:auto;gap:4px;}}
-#irow{{padding:8px 12px;border-top:1px solid rgba(255,255,255,.06);display:flex;gap:6px;}}
-#inp{{flex:1;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);border-radius:8px;
-padding:8px 10px;color:#fff;font-size:12px;outline:none;}}
-#inp:focus{{border-color:rgba(229,62,62,.4);}}
-#sbtn{{background:#e53e3e;border:none;border-radius:8px;padding:8px 14px;color:white;
-font-size:12px;cursor:pointer;font-weight:600;}}
-#sbtn:hover{{background:#fc4f4f;}}
-</style></head><body>
-<div id="panel">
-  <div id="hdr">
-    <div id="av">C</div>
-    <div><div style="font-size:13px;font-weight:700;color:#fff;">CAT 2 Buddy</div>
-    <div style="font-size:10px;color:#38a169;">● Online</div></div>
-  </div>
-  <div id="msgs">{chat_html}</div>
-  <div id="irow">
-    <input id="inp" placeholder="Ask anything about CAT-2 procurement..." />
-    <button id="sbtn">Send</button>
-  </div>
-</div>
-<button id="fab">&#128172;</button>
-<script>
-var panel=document.getElementById('panel'),fab=document.getElementById('fab'),
-    inp=document.getElementById('inp'),sbtn=document.getElementById('sbtn'),
-    msgs=document.getElementById('msgs');
-if(msgs) msgs.scrollTop=msgs.scrollHeight;
-fab.addEventListener('click',function(){{
-  var o=panel.style.display==='flex';
-  panel.style.display=o?'none':'flex';
-  fab.innerHTML=o?'&#128172;':'&#10005;';
-  if(!o&&msgs) setTimeout(function(){{msgs.scrollTop=msgs.scrollHeight;}},50);
-}});
-function doSend(){{
-  var v=inp.value.trim();if(!v)return;inp.value='';
-  window.parent.location.href=window.parent.location.pathname+'?buddy_msg='+encodeURIComponent(v);
-}}
-sbtn.addEventListener('click',doSend);
-inp.addEventListener('keydown',function(e){{if(e.key==='Enter')doSend();}});
-</script></body></html>""", height=420 if buddy_open else 80, scrolling=False)
+# Render chat history
+for m in st.session_state.buddy_msgs[-12:]:
+    with st.chat_message("user" if m['role'] == 'user' else "assistant"):
+        st.markdown(m['text'])
 
-# Handle buddy message from query param
-buddy_msg = st.query_params.get("buddy_msg", "")
-if buddy_msg and buddy_msg.strip():
-    st.query_params.clear()
-    st.session_state.buddy_msgs.append({"role": "user", "text": buddy_msg})
-    st.session_state.buddy_open = True
-    with st.spinner(""):
-        reply = buddy_chat(buddy_msg, df_pos, df_ong)
+# Chat input — always visible at bottom
+if prompt := st.chat_input("Ask anything about CAT-2 procurement…"):
+    st.session_state.buddy_msgs.append({"role": "user", "text": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+    with st.chat_message("assistant"):
+        with st.spinner(""):
+            reply = buddy_chat(prompt, df_pos, df_ong)
+        st.markdown(reply)
     st.session_state.buddy_msgs.append({"role": "bot", "text": reply})
-    st.rerun()
