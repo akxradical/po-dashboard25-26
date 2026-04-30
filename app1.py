@@ -87,7 +87,8 @@ def load_po_tracker():
         # Filter real rows by BU
         bu_col = next((c for c in df.columns if c.strip().upper()=='BU'), None)
         if not bu_col: return pd.DataFrame(), "BU column not found"
-        df = df[df[bu_col].str.strip().ne('') & df[bu_col].str.strip().ne('nan')].copy().reset_index(drop=True)
+        bu_s = df[bu_col].astype(str).str.strip()
+        df = df[bu_s.ne('') & bu_s.ne('nan') & bu_s.ne('None')].copy().reset_index(drop=True)
 
         # Dates
         date_kw = ['dt.','dt ',' dt','date','dt\n','\ndt']
@@ -152,7 +153,8 @@ def load_ongoing():
         df = pd.DataFrame(data[2:], columns=headers)
         bu_col = next((c for c in df.columns if c.strip().upper()=='BU'), None)
         if bu_col:
-            df = df[df[bu_col].str.strip().ne('') & df[bu_col].str.strip().ne('nan')].copy()
+            bu_s = df[bu_col].astype(str).str.strip()
+            df = df[bu_s.ne('') & bu_s.ne('nan') & bu_s.ne('None')].copy()
         df = df.reset_index(drop=True)
         for c in df.columns:
             cl = c.lower()
@@ -285,7 +287,7 @@ C_ITEMS   = 'Items' if 'Items' in df_raw.columns else None
 # Filters
 c1,c2,c3,c4,c5 = st.columns([1,1,1,1,.4])
 with c1:
-    bu_opts = ['All']+sorted(df_raw[C_BU].str.strip().replace('',np.nan).dropna().unique().tolist())
+    bu_opts = ['All']+sorted(df_raw[C_BU].astype(str).str.strip().replace({'':'nan'}).pipe(lambda s: s[s.ne('nan')]).unique().tolist())
     sel_bu = st.selectbox('BU', bu_opts, key='f_bu')
 with c2:
     cat_opts = ['All']+(sorted(df_raw[C_CAT].dropna().unique().tolist()) if C_CAT else [])
