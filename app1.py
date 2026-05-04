@@ -81,7 +81,14 @@ def load_po_tracker():
         data = ws.get_all_values(value_render_option='FORMATTED_VALUE')
         if len(data) < 2: return pd.DataFrame(), "Sheet is empty"
 
-        headers = [str(h).strip() for h in data[0]]
+        raw_h = [str(h).strip() if h else '' for h in data[0]]
+        seen = {}
+        headers = []
+        for h in raw_h:
+            if not h: h = f'_col_{len(headers)}'
+            if h in seen: seen[h] += 1; h = f'{h}_{seen[h]}'
+            else: seen[h] = 0
+            headers.append(h)
         df = pd.DataFrame(data[1:], columns=headers)
 
         # Filter real rows by BU
@@ -149,22 +156,49 @@ def load_ongoing():
         if not ws: return pd.DataFrame(), "Ongoing tab not found"
         data = ws.get_all_values(value_render_option='FORMATTED_VALUE')
         if len(data) < 3: return pd.DataFrame(), "Empty"
-        headers = [str(h).strip() for h in data[1]]
+
+        # Row 0 = title, Row 1 = headers — deduplicate blank/duplicate names
+        raw_headers = [str(h).strip() if h else '' for h in data[1]]
+        headers = []
+        seen = {}
+        for h in raw_headers:
+            if not h:
+                h = f'_col_{len(headers)}'
+            if h in seen:
+                seen[h] += 1
+                h = f'{h}_{seen[h]}'
+            else:
+                seen[h] = 0
+            headers.append(h)
+
         df = pd.DataFrame(data[2:], columns=headers)
-        bu_col = next((c for c in df.columns if c.strip().upper()=='BU'), None)
+
+        # Filter real rows by BU
+        bu_col = next((c for c in df.columns if c.strip().upper() == 'BU'), None)
         if bu_col:
             bu_s = df[bu_col].astype(str).str.strip()
             df = df[bu_s.ne('') & bu_s.ne('nan') & bu_s.ne('None')].copy()
         df = df.reset_index(drop=True)
+
+        # Parse each column safely — skip helper/blank cols
+        # Note: ongoing sheet has duplicate header at col 10 (renamed to _col_10)
+        # "deliver" keyword matches both YTD and delivered cols — handle both
         for c in df.columns:
-            cl = c.lower()
-            if any(x in cl for x in ['value','deliver','saving','amount']):
-                df[c] = safe_num(df[c]).fillna(0)
-            if any(x in cl for x in ['date','dt']):
-                df[c] = parse_dates(df[c])
+            if c.startswith('_col_'):
+                continue
+            cl = c.lower().replace('\n', ' ')
+            try:
+                if any(x in cl for x in ['value', 'saving', 'amount', 'delivered in', 'yet to']):
+                    df[c] = safe_num(df[c]).fillna(0)
+                elif any(x in cl for x in ['date', 'dt']):
+                    df[c] = parse_dates(df[c])
+            except Exception:
+                pass
+
         return df, None
     except Exception as e:
-        return pd.DataFrame(), str(e)
+        import traceback
+        return pd.DataFrame(), f"{e} | {traceback.format_exc()}"
 
 def fc(df, *kws):
     for c in df.columns:
@@ -270,7 +304,9 @@ C_PO_VAL  = fc(df_raw,'po','basic','value')
 C_SAV     = fc(df_raw,'savings','value') or fc(df_raw,'saving')
 C_SAV_PCT = fc(df_raw,'saving','%')
 C_TAT     = fc(df_raw,'pr','po','tat')
-C_STYPE   = fc(df_raw,'supplier','type')
+# Supplier type: prefer _SupplierType (col AO, reliable) over col O (VLOOKUP, often None)
+C_STYPE   = next((c for c in df_raw.columns if '_suppliertype' in c.lower().replace(' ','')),
+            fc(df_raw,'supplier','type'))
 C_PAY     = fc(df_raw,'payment','term')
 C_MFC_DT  = fc(df_raw,'mfc','dt')
 C_MFC_DAYS= fc(df_raw,'delivery time') or fc(df_raw,'mfc','days')
@@ -284,8 +320,8 @@ C_CAT     = 'Category' if 'Category' in df_raw.columns else None
 C_HANDLER = fc(df_raw,'handled by')
 C_ITEMS   = 'Items' if 'Items' in df_raw.columns else None
 
-# Filters
-c1,c2,c3,c4,c5 = st.columns([1,1,1,1,.4])
+# Filters — 6 columns: BU, Category, Buyer, Supplier Type, Month, Refresh
+c1,c2,c3,c4,c5,c6 = st.columns([1,1,1,1,1,.4])
 with c1:
     bu_opts = ['All']+sorted(df_raw[C_BU].astype(str).str.strip().replace({'':'nan'}).pipe(lambda s: s[s.ne('nan')]).unique().tolist())
     sel_bu = st.selectbox('BU', bu_opts, key='f_bu')
@@ -298,9 +334,22 @@ with c3:
 with c4:
     stype_opts = ['All']
     if C_STYPE and C_STYPE in df_raw.columns:
-        stype_opts += sorted([s for s in df_raw[C_STYPE].dropna().unique() if str(s).strip()])
+        stype_opts += sorted([s for s in df_raw[C_STYPE].dropna().unique() if str(s).strip() not in ('','nan','None')])
     sel_st = st.selectbox('Supplier Type', stype_opts, key='f_st')
 with c5:
+    # Month filter — based on PO Date
+    month_opts = ['All']
+    if C_PO_DT and C_PO_DT in df_raw.columns:
+        po_dates_all = pd.to_datetime(df_raw[C_PO_DT], errors='coerce')
+        months_avail = (po_dates_all.dropna()
+                        .dt.to_period('M')
+                        .sort_values()
+                        .unique()
+                        .astype(str)
+                        .tolist())
+        month_opts += months_avail
+    sel_month = st.selectbox('PO Month', month_opts, key='f_month')
+with c6:
     st.markdown("<div style='padding-top:18px;'>", unsafe_allow_html=True)
     if st.button("⟳ Refresh"): st.cache_data.clear(); st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
@@ -310,6 +359,10 @@ if sel_bu    != 'All': dff = dff[dff[C_BU]==sel_bu]
 if sel_cat   != 'All' and C_CAT: dff = dff[dff[C_CAT]==sel_cat]
 if sel_buyer != 'All' and C_HANDLER: dff = dff[dff[C_HANDLER]==sel_buyer]
 if sel_st    != 'All' and C_STYPE and C_STYPE in dff.columns: dff = dff[dff[C_STYPE]==sel_st]
+# Month filter applies to PO Date — only rows with a PO date in that month
+if sel_month != 'All' and C_PO_DT and C_PO_DT in dff.columns:
+    po_dt_s = pd.to_datetime(dff[C_PO_DT], errors='coerce')
+    dff = dff[po_dt_s.dt.to_period('M').astype(str) == sel_month]
 
 has_pr = pd.notna(dff[C_PR_DT]) if C_PR_DT else pd.Series(False,index=dff.index)
 has_po = pd.notna(dff[C_PO_DT]) if C_PO_DT else pd.Series(False,index=dff.index)
@@ -354,11 +407,15 @@ if C_OTIF and C_OTIF in df_completed.columns and len(df_completed)>0:
     ov = ov[ov>0]; otif_n = len(ov)
     if otif_n>0: otif_pct = float((ov<=1.05).sum()/otif_n*100)
 
-# NVD
+# NVD — only count rows where supplier type is filled (not None/blank)
 nv_n, nv_pct = 0, 0.0
 if C_STYPE and C_STYPE in df_pos.columns:
-    nvm = df_pos[C_STYPE].astype(str).str.upper().str.contains('NV',na=False)
-    nv_n = int(nvm.sum()); nv_pct = nv_n/n_pos*100 if n_pos>0 else 0.0
+    stype_s = df_pos[C_STYPE].astype(str).str.strip().replace({'nan':'','None':''})
+    stype_filled_mask = stype_s.ne('')
+    n_stype_filled = int(stype_filled_mask.sum())
+    nv_mask = stype_s.str.upper().str.contains('NV', na=False)
+    nv_n    = int(nv_mask.sum())
+    nv_pct  = nv_n / n_stype_filled * 100 if n_stype_filled > 0 else 0.0
 
 # WC Score
 wc_score = None
@@ -546,14 +603,25 @@ with t3:
 with t4:
     if '_PayScore' in df_pos.columns and C_PAY and len(df_pos)>0:
         wcs=df_pos[df_pos['_PayScore'].notna()].copy()
-        pv=pd.to_numeric(wcs[C_PO_VAL],errors='coerce').fillna(0) if C_PO_VAL else pd.Series(dtype=float)
-        n_terms=len(wcs); n_adv=int((wcs['_PayScore']<0).sum()); adv_pct=n_adv/n_terms*100 if n_terms>0 else 0
-        n_high=int((wcs['_PayScore']>=5).sum())
-        c1,c2,c3,c4=st.columns(4)
-        with c1: st.metric("WC Score",f"{wc_score:.2f}" if wc_score else "—",f"{'≥4.5 ✓' if wc_score and wc_score>=4.5 else '<4.5 ✗'}")
-        with c2: st.metric("POs with Terms",f"{n_terms}/{n_pos}")
-        with c3: st.metric("Advance Payment",str(n_adv),f"{adv_pct:.1f}%")
-        with c4: st.metric("High WC (≥5)",str(n_high))
+        pv_all = pd.to_numeric(df_pos[C_PO_VAL],errors='coerce').fillna(0) if C_PO_VAL else pd.Series(0,index=df_pos.index)
+        pv_wcs = pd.to_numeric(wcs[C_PO_VAL],errors='coerce').fillna(0) if C_PO_VAL else pd.Series(dtype=float)
+        n_terms = len(wcs)
+        n_high  = int((wcs['_PayScore']>=5).sum())
+
+        # Advance value vs total
+        adv_mask = wcs['_PayScore'] < 0
+        adv_val  = float(pv_wcs[adv_mask.values].sum()) / 1e7
+        total_val_wcs = float(pv_wcs.sum()) / 1e7
+        adv_pct  = adv_val / total_val_wcs * 100 if total_val_wcs > 0 else 0
+
+        c1,c2,c3,c4 = st.columns(4)
+        with c1: st.metric("WC Score", f"{wc_score:.2f}" if wc_score else "—",
+                            f"{'≥4.5 ✓' if wc_score and wc_score>=4.5 else '<4.5 ✗'}")
+        with c2: st.metric("POs with Terms", f"{n_terms}/{n_pos}")
+        with c3: st.metric("Advance Payment Value",
+                            f"Rs {adv_val:.2f} Cr",
+                            f"{adv_pct:.1f}% of Rs {total_val_wcs:.2f} Cr")
+        with c4: st.metric("High WC (≥5)", str(n_high))
         c1,c2=st.columns(2)
         with c1:
             pt=df_pos[C_PAY].dropna().astype(str).str.strip(); pt=pt[pt.ne('')].value_counts().head(12).reset_index(); pt.columns=['Term','Count']
@@ -574,26 +642,57 @@ with t4:
 # ════ TAB 5 — NEW VENDOR DEV ════════════════════════════════
 with t5:
     if C_STYPE and C_STYPE in df_pos.columns and len(df_pos)>0:
-        avl_oem=int(df_pos[C_STYPE].str.upper().str.contains('AVL OEM',na=False).sum())
-        avl_trd=int(df_pos[C_STYPE].str.upper().str.contains('TRADER',na=False).sum())
-        c1,c2,c3,c4=st.columns(4)
-        with c1: st.metric("NVD %",f"{nv_pct:.1f}%","On target" if 10<=nv_pct<=15 else ("Below" if nv_pct<10 else "Above"))
-        with c2: st.metric("NV POs",str(nv_n),f"of {n_pos} POs")
-        with c3: st.metric("AVL OEM",str(avl_oem))
-        with c4: st.metric("AVL Trader",str(avl_trd))
-        c1,c2=st.columns(2)
+        # Only count rows where supplier type is actually filled
+        stype_filled = df_pos[C_STYPE].astype(str).str.strip().replace({'nan':'','None':''})
+        df_pos_stype = df_pos[stype_filled.ne('')].copy()
+        n_stype_total = len(df_pos_stype)
+
+        avl_oem = int(df_pos_stype[C_STYPE].str.upper().str.contains('AVL OEM', na=False).sum())
+        avl_trd = int(df_pos_stype[C_STYPE].str.upper().str.contains('TRADER', na=False).sum())
+        nv_mask_filled = df_pos_stype[C_STYPE].astype(str).str.upper().str.contains('NV', na=False)
+        nv_n_filled    = int(nv_mask_filled.sum())
+        nv_pct_filled  = nv_n_filled / n_stype_total * 100 if n_stype_total > 0 else 0.0
+
+        c1,c2,c3,c4 = st.columns(4)
+        with c1: st.metric("NVD %", f"{nv_pct_filled:.1f}%",
+                            "On target" if 10<=nv_pct_filled<=15 else ("Below" if nv_pct_filled<10 else "Above"))
+        with c2: st.metric("NV POs", str(nv_n_filled), f"of {n_stype_total} POs with type filled")
+        with c3: st.metric("AVL OEM", str(avl_oem))
+        with c4: st.metric("AVL Trader", str(avl_trd))
+        c1,c2 = st.columns(2)
         with c1:
-            nv_bu=df_pos.groupby(C_BU).apply(lambda x: pd.Series({'Total':len(x),'NV':int(x[C_STYPE].str.upper().str.contains('NV',na=False).sum())})).reset_index()
-            nv_bu['NV%']=(nv_bu['NV']/nv_bu['Total']*100).fillna(0)
-            fig8=go.Figure(go.Bar(x=nv_bu[C_BU],y=nv_bu['NV%'],marker_color=[GRN if 10<=v<=15 else AMB for v in nv_bu['NV%']],marker_line_width=0,text=nv_bu['NV%'].apply(lambda x:f'{x:.1f}%'),textposition='outside',textfont=dict(color='#888',size=11)))
-            fig8.add_hrect(y0=10,y1=15,fillcolor='rgba(56,161,105,.06)',line_width=0)
-            apply_dk(fig8,height=280,title_text='NVD % by BU',showlegend=False,yaxis_range=[0,max(float(nv_bu['NV%'].max())*1.3,20)])
+            nv_bu = (df_pos_stype.groupby(C_BU)
+                     .apply(lambda x: pd.Series({
+                         'Total': len(x),
+                         'NV': int(x[C_STYPE].astype(str).str.upper().str.contains('NV',na=False).sum())
+                     })).reset_index())
+            nv_bu['NV%'] = (nv_bu['NV'] / nv_bu['Total'] * 100).fillna(0)
+            fig8 = go.Figure(go.Bar(
+                x=nv_bu[C_BU], y=nv_bu['NV%'],
+                marker_color=[GRN if 10<=v<=15 else AMB for v in nv_bu['NV%']],
+                marker_line_width=0,
+                text=nv_bu['NV%'].apply(lambda x: f'{x:.1f}%'),
+                textposition='outside', textfont=dict(color='#888', size=11)
+            ))
+            fig8.add_hrect(y0=10, y1=15, fillcolor='rgba(56,161,105,.06)', line_width=0)
+            apply_dk(fig8, height=280, title_text='NVD % by BU (filled rows only)',
+                     showlegend=False, yaxis_range=[0, max(float(nv_bu['NV%'].max())*1.3, 20)])
             st.plotly_chart(fig8, width='stretch')
         with c2:
-            sv2=df_pos[C_STYPE].value_counts().reset_index(); sv2.columns=['Type','Count']; sv2=sv2[sv2['Type'].ne('')]
+            sv2 = df_pos_stype[C_STYPE].value_counts().reset_index()
+            sv2.columns = ['Type', 'Count']
+            sv2 = sv2[sv2['Type'].ne('')]
             if len(sv2):
-                fp2=go.Figure(go.Pie(labels=sv2['Type'],values=sv2['Count'],hole=0.4,marker_colors=[GRN,BLU,RED,PUR,AMB],textfont=dict(color='white',size=11)))
-                fp2.update_layout(paper_bgcolor='rgba(0,0,0,0)',plot_bgcolor='rgba(0,0,0,0)',font=dict(color='#888'),margin=dict(l=8,r=8,t=36,b=8),title_text='Supplier Type Mix',legend=dict(font=dict(color='#888',size=11),bgcolor='rgba(0,0,0,0)'))
+                fp2 = go.Figure(go.Pie(
+                    labels=sv2['Type'], values=sv2['Count'], hole=0.4,
+                    marker_colors=[GRN, BLU, RED, PUR, AMB],
+                    textfont=dict(color='white', size=11)
+                ))
+                fp2.update_layout(
+                    paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='#888'), margin=dict(l=8,r=8,t=36,b=8),
+                    title_text='Supplier Type Mix', legend=dict(font=dict(color='#888',size=11), bgcolor='rgba(0,0,0,0)')
+                )
                 st.plotly_chart(fp2, width='stretch')
     else:
         st.markdown('<div class="info-box">Supplier type data will populate once POs are placed.</div>', unsafe_allow_html=True)
@@ -637,7 +736,7 @@ with t6:
                     if st.button(f"{'● ' if sel3 else ''}{lbl3}",key=f"mfc_{key3}",use_container_width=True):
                         st.session_state.mfc_f=key3 if not sel3 else 'ALL'; st.rerun()
             disp=mfc_df if st.session_state.mfc_f=='ALL' else mfc_df[mfc_df['Alert']==st.session_state.mfc_f]
-            show=[c for c in ['SN',C_BU,'Project Name',C_ITEMS,C_CAT,C_SUPPLIER,'PO/OD Ref.'] if c and c in disp.columns]+['_mfc','_days','Expected','Days Left','Alert']
+            show=[c for c in ['SN',C_BU,'Project Name',C_ITEMS,C_CAT,C_SUPPLIER,C_HANDLER,'PO/OD Ref.'] if c and c in disp.columns]+['_mfc','_days','Expected','Days Left','Alert']
             ds=disp[[c for c in show if c in disp.columns]].copy().rename(columns={'_mfc':'MFC Date','_days':'Del Days'})
             ds['MFC Date']=ds['MFC Date'].dt.strftime('%d-%b-%Y'); ds['Expected']=ds['Expected'].dt.strftime('%d-%b-%Y')
             ast={'OVERDUE':'background:#2a0000;color:#ff9999;font-weight:700;','RED':'background:#1a0000;color:#ff6666;font-weight:700;','AMBER':'background:#1a1000;color:#ffcc66;','GREEN':'background:#001a00;color:#66cc66;'}
