@@ -261,10 +261,10 @@ st.markdown("""<style>
 .zD{width:7px;height:7px;background:#38a169;border-radius:50%;animation:p 2s infinite;}
 @keyframes p{0%,100%{opacity:1}50%{opacity:.3}}
 
-/* ── LOADING OVERLAY ── */
-#zetwerk-loader{position:fixed;inset:0;background:#0d0d1a;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity .6s ease;}
-#zetwerk-loader.hidden{opacity:0;pointer-events:none;}
-.loader-logo{width:80px;height:80px;border-radius:18px;overflow:hidden;animation:spin 2s linear infinite;}
+/* ── LOADING OVERLAY — pure CSS, auto-hides after 1.5s ── */
+#zetwerk-loader{position:fixed;inset:0;background:#0d0d1a;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;animation:loaderFade 0.5s ease 1.5s forwards;}
+@keyframes loaderFade{0%{opacity:1;pointer-events:all;}100%{opacity:0;pointer-events:none;visibility:hidden;}}
+.loader-logo{width:80px;height:80px;border-radius:18px;overflow:hidden;animation:spin 1.2s linear infinite;}
 @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
 .loader-title{font-size:22px;font-weight:800;color:#fff;margin-top:20px;letter-spacing:-.01em;}
 .loader-sub{font-size:12px;color:rgba(255,255,255,.35);margin-top:6px;letter-spacing:.1em;text-transform:uppercase;}
@@ -342,12 +342,6 @@ st.markdown(f"""
   <div class="loader-title">CAT-2 · Zetwerk</div>
   <div class="loader-sub">Central Procurement Team</div>
 </div>
-<script>
-setTimeout(function(){{
-  var el=document.getElementById('zetwerk-loader');
-  if(el){{el.classList.add('hidden');setTimeout(function(){{el.style.display='none';}},700);}}
-}},1500);
-</script>
 
 <div class="zN"><div class="zNL">
   <div class="zLogo">{'<img src="'+_logo_src+'" alt="Zetwerk" style="width:36px;height:36px;object-fit:cover;border-radius:8px;"/>' if _logo_src else '<div style="width:36px;height:36px;background:linear-gradient(135deg,#1e3a7a,#2d5dbf);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:900;color:white;">Z</div>'}</div>
