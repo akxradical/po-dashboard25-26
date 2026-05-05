@@ -248,46 +248,116 @@ st.markdown("""<style>
 [data-testid="stMainBlockContainer"],[data-testid="stAppViewBlockContainer"],section[data-testid="stMain"]>div,.block-container{max-width:100%!important;width:100%!important;padding:0 20px!important;}
 [data-testid="stSidebar"]{display:none!important;}
 [data-testid="stHorizontalBlock"]{gap:10px!important;}
+
+/* ── NAVBAR ── */
 .zN{background:#13131a;border-bottom:1px solid rgba(255,255,255,.07);padding:0 24px;display:flex;align-items:center;justify-content:space-between;height:52px;margin:0 -20px 8px;}
 .zNL{display:flex;align-items:center;gap:10px;}
-.zZ{width:32px;height:32px;background:linear-gradient(135deg,#e53e3e,#fc4f4f);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:900;color:white;}
-.zB{font-size:14px;font-weight:700;color:white;}.zS{font-size:10px;color:#444;}
+.zLogo{width:36px;height:36px;border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center;}
+.zLogo img{width:36px;height:36px;object-fit:cover;border-radius:8px;}
+.zB{font-size:14px;font-weight:700;color:white;}.zS{font-size:10px;color:#aaa;}
 .zR{display:flex;align-items:center;gap:10px;}
 .zP{background:rgba(229,62,62,.12);border:1px solid rgba(229,62,62,.3);color:#fc4f4f;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:600;}
 .zL{display:flex;align-items:center;gap:5px;font-size:11px;color:#38a169;}
 .zD{width:7px;height:7px;background:#38a169;border-radius:50%;animation:p 2s infinite;}
 @keyframes p{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* ── LOADING OVERLAY ── */
+#zetwerk-loader{position:fixed;inset:0;background:#0d0d1a;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity .6s ease;}
+#zetwerk-loader.hidden{opacity:0;pointer-events:none;}
+.loader-logo{width:80px;height:80px;border-radius:18px;overflow:hidden;animation:spin 2s linear infinite;}
+@keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+.loader-title{font-size:22px;font-weight:800;color:#fff;margin-top:20px;letter-spacing:-.01em;}
+.loader-sub{font-size:12px;color:rgba(255,255,255,.35);margin-top:6px;letter-spacing:.1em;text-transform:uppercase;}
+
+/* ── KPI CARDS ── */
 .kG{display:grid;gap:10px;padding:4px 0;}
 .k5{grid-template-columns:repeat(5,1fr)}.k4{grid-template-columns:repeat(4,1fr)}.k3{grid-template-columns:repeat(3,1fr)}
 .kC{background:#13131a;border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:14px 16px;position:relative;overflow:hidden;}
 .kC::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;border-radius:12px 12px 0 0;}
 .cR::before{background:#e53e3e}.cG::before{background:#38a169}.cB::before{background:#3182ce}.cA::before{background:#d69e2e}.cP::before{background:#805ad5}.cT::before{background:#2c7a7b}
-.kL{font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:.06em;}
+.kL{font-size:10px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.06em;}
 .kV{font-size:24px;font-weight:800;color:#fff;line-height:1.1;margin:3px 0;font-family:'DM Mono',monospace!important;}
-.kS{font-size:10px;color:#555;}.kD{font-size:10px;font-weight:600;margin-top:3px;}
+.kS{font-size:10px;color:#666;}.kD{font-size:10px;font-weight:600;margin-top:3px;}
 .up{color:#68d391}.dn{color:#fc8181}.wn{color:#f6e05e}
-[data-testid="stTabs"] button[role="tab"]{font-size:12px!important;font-weight:500!important;color:#555!important;}
-[data-testid="stTabs"] button[role="tab"][aria-selected="true"]{color:#fc4f4f!important;border-bottom:2px solid #e53e3e!important;}
-[data-testid="stSelectbox"] label{font-size:10px!important;color:#666!important;font-weight:700!important;text-transform:uppercase;}
-[data-testid="stSelectbox"]>div>div{background:#13131a!important;border:1px solid rgba(255,255,255,.1)!important;border-radius:8px!important;color:#ccc!important;font-size:13px!important;}
+
+/* ── TABS — white text, visible ── */
+[data-testid="stTabs"] button[role="tab"]{font-size:12px!important;font-weight:600!important;color:#aaa!important;}
+[data-testid="stTabs"] button[role="tab"]:hover{color:#fff!important;}
+[data-testid="stTabs"] button[role="tab"][aria-selected="true"]{color:#fff!important;border-bottom:2px solid #e53e3e!important;}
+
+/* ── FILTERS — white labels and values ── */
+[data-testid="stSelectbox"] label{font-size:10px!important;color:#ccc!important;font-weight:700!important;text-transform:uppercase;}
+[data-testid="stSelectbox"]>div>div{background:#13131a!important;border:1px solid rgba(255,255,255,.15)!important;border-radius:8px!important;color:#fff!important;font-size:13px!important;}
+
+/* ── METRICS ── */
 [data-testid="stMetric"]{background:#13131a!important;border-radius:10px!important;padding:12px!important;border:1px solid rgba(255,255,255,.07)!important;}
 [data-testid="stMetricValue"]{font-size:22px!important;font-weight:800!important;color:#fff!important;font-family:'DM Mono',monospace!important;}
-[data-testid="stMetricLabel"]{font-size:10px!important;color:#666!important;text-transform:uppercase;}
+[data-testid="stMetricLabel"]{font-size:10px!important;color:#aaa!important;text-transform:uppercase;}
+[data-testid="stMetricDelta"]{font-size:11px!important;}
+
+/* ── TABLES ── */
 .zT{width:100%;border-collapse:collapse;font-size:12px;}
-.zT th{text-align:left;padding:8px 12px;font-size:10px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid rgba(255,255,255,.07);}
-.zT td{padding:8px 12px;color:#bbb;border-bottom:1px solid rgba(255,255,255,.03);}
+.zT th{text-align:left;padding:8px 12px;font-size:10px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid rgba(255,255,255,.07);}
+.zT td{padding:8px 12px;color:#ccc;border-bottom:1px solid rgba(255,255,255,.03);}
 .zT tr:hover td{background:rgba(255,255,255,.02);}
 .mn{font-family:'DM Mono',monospace!important;font-size:11px;}
 .pg{background:rgba(56,161,105,.15);color:#68d391;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:600;}
 .pr{background:rgba(229,62,62,.15);color:#fc8181;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:600;}
 .pa{background:rgba(214,158,46,.15);color:#f6e05e;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:600;}
-.info-box{font-size:12px;color:#888;background:rgba(255,255,255,.03);padding:10px 14px;border-radius:8px;border-left:3px solid #333;margin:4px 0;}
+.info-box{font-size:12px;color:#888;background:rgba(255,255,255,.03);padding:10px 14px;border-radius:8px;border-left:3px solid #444;margin:4px 0;}
+
+/* ── PIPELINE label fix — white text ── */
+.pip-label{font-size:10px;color:#aaa !important;text-transform:uppercase;letter-spacing:.05em;margin-top:2px;}
+
+/* ── CHATBOT — compact, collapsible ── */
+.buddy-wrap{background:#13131a;border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:10px 16px;margin-top:12px;}
+.buddy-header{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
+.buddy-icon{width:24px;height:24px;background:linear-gradient(135deg,#e53e3e,#fc4f4f);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:white;}
+.buddy-title{font-size:12px;font-weight:700;color:#eee;}
+.buddy-status{font-size:9px;color:#38a169;}
+
+/* Shrink chat messages */
+[data-testid="stChatMessage"]{padding:6px 10px!important;margin:2px 0!important;}
+[data-testid="stChatMessageContent"] p{font-size:12px!important;line-height:1.4!important;}
+[data-testid="stChatInput"]{margin-top:4px!important;}
+[data-testid="stChatInput"] textarea{font-size:12px!important;padding:8px 12px!important;min-height:36px!important;}
 </style>""", unsafe_allow_html=True)
 
 ts = datetime.now().strftime("%d %b %Y %H:%M")
-st.markdown(f"""<div class="zN"><div class="zNL"><div class="zZ">Z</div>
-<div><div class="zB">Zetwerk CPT</div><div class="zS">Central Procurement Team · CAT-2</div></div></div>
-<div class="zR"><div class="zL"><div class="zD"></div>Live · {ts}</div><div class="zP">FY 2026-27</div></div></div>""", unsafe_allow_html=True)
+
+# Encode the Zetwerk logo as base64 for inline use
+import base64, os
+_logo_b64 = ""
+_logo_path = "/mnt/user-data/uploads/1777972835068_image.png"
+if os.path.exists(_logo_path):
+    with open(_logo_path, "rb") as _f:
+        _logo_b64 = base64.b64encode(_f.read()).decode()
+
+_logo_src = f"data:image/png;base64,{_logo_b64}" if _logo_b64 else ""
+
+# Spinning loader shown on first render, hides after 1.5s
+st.markdown(f"""
+<div id="zetwerk-loader">
+  {'<img class="loader-logo" src="'+_logo_src+'" alt="Zetwerk"/>' if _logo_src else '<div class="loader-logo" style="background:linear-gradient(135deg,#1e3a7a,#2d5dbf);display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:900;color:white;border-radius:18px;">Z</div>'}
+  <div class="loader-title">CAT-2 · Zetwerk</div>
+  <div class="loader-sub">Central Procurement Team</div>
+</div>
+<script>
+setTimeout(function(){{
+  var el=document.getElementById('zetwerk-loader');
+  if(el){{el.classList.add('hidden');setTimeout(function(){{el.style.display='none';}},700);}}
+}},1500);
+</script>
+
+<div class="zN"><div class="zNL">
+  <div class="zLogo">{'<img src="'+_logo_src+'" alt="Zetwerk" style="width:36px;height:36px;object-fit:cover;border-radius:8px;"/>' if _logo_src else '<div style="width:36px;height:36px;background:linear-gradient(135deg,#1e3a7a,#2d5dbf);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:900;color:white;">Z</div>'}</div>
+  <div>
+    <div class="zB">CAT-2 · Zetwerk</div>
+    <div class="zS">Central Procurement Team · FY 2026-27</div>
+  </div>
+</div>
+<div class="zR"><div class="zL"><div class="zD"></div>Live · {ts}</div><div class="zP">FY 2026-27</div></div>
+</div>""", unsafe_allow_html=True)
 
 if df_raw.empty:
     st.error(f"Could not load sheet: {po_err}")
@@ -848,9 +918,13 @@ with t8:
 # Footer
 st.markdown(f'<div style="padding:12px 0;border-top:1px solid rgba(255,255,255,.04);margin-top:16px;display:flex;justify-content:space-between;"><div style="font-size:11px;color:#333;">Zetwerk CPT · CAT-2 · FY 2026-27</div><div style="font-size:10px;color:#222;font-family:DM Mono,monospace;">{ts} · TTL 60s</div></div>', unsafe_allow_html=True)
 
-# CAT 2 BUDDY
-st.markdown("""<div style="margin-top:24px;border-top:1px solid rgba(255,255,255,.06);padding-top:12px;"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><div style="width:28px;height:28px;background:linear-gradient(135deg,#e53e3e,#fc4f4f);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;color:white;">C</div><span style="font-size:13px;font-weight:700;color:#eee;">CAT 2 Buddy</span><span style="font-size:10px;color:#38a169;">● Online</span></div></div>""", unsafe_allow_html=True)
-for m in st.session_state.buddy_msgs[-12:]:
+# CAT 2 BUDDY — compact
+st.markdown("""<div class="buddy-wrap"><div class="buddy-header">
+<div class="buddy-icon">C</div>
+<span class="buddy-title">CAT 2 Buddy</span>
+<span class="buddy-status">● Online</span>
+</div></div>""", unsafe_allow_html=True)
+for m in st.session_state.buddy_msgs[-4:]:
     with st.chat_message("user" if m['role']=='user' else "assistant"):
         st.markdown(m['text'])
 if prompt:=st.chat_input("Ask anything about CAT-2 procurement…"):
