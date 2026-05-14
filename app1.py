@@ -124,15 +124,21 @@ def load_po_tracker():
             if pd.notna(mx) and mx < 2:
                 df[sav_pct_col] = df[sav_pct_col] * 100
 
-        # Supplier type: col O (VLOOKUP, often None) → fill from col AO (_SupplierType)
+        # Supplier type: col O (VLOOKUP, often None) + col AO (_SupplierType)
+        # Merge: use col O when filled, fill gaps from col AO
         sup_o  = next((c for c in df.columns if c.strip().lower()=='supplier type'), None)
         sup_ao = next((c for c in df.columns if '_suppliertype' in c.lower().replace(' ','')), None)
-        if sup_ao:
-            if sup_o:
-                mask = df[sup_o].astype(str).str.strip().isin(['','nan','None'])
-                df.loc[mask, sup_o] = df.loc[mask, sup_ao].values
-            else:
-                df['Supplier type'] = df[sup_ao]
+        if sup_o and sup_ao:
+            # Fill col O gaps from col AO
+            mask_empty = df[sup_o].astype(str).str.strip().isin(['','nan','None'])
+            df.loc[mask_empty, sup_o] = df.loc[mask_empty, sup_ao].values
+        elif sup_ao and not sup_o:
+            df['Supplier type'] = df[sup_ao]
+            sup_o = 'Supplier type'
+        # Also fill col AO gaps from col O (so both are complete)
+        if sup_o and sup_ao:
+            mask_ao_empty = df[sup_ao].astype(str).str.strip().isin(['','nan','None'])
+            df.loc[mask_ao_empty, sup_ao] = df.loc[mask_ao_empty, sup_o].values
 
         # Payment score
         pay_col = next((c for c in df.columns if 'payment' in c.lower() and 'term' in c.lower()), None)
@@ -390,7 +396,7 @@ C_HANDLER = fc(df_raw,'handled by')
 C_ITEMS   = 'Items' if 'Items' in df_raw.columns else None
 
 # Filters — 6 columns: BU, Category, Buyer, Supplier Type, Month, Refresh
-c1,c2,c3,c4,c5,c6 = st.columns([1,1,1,1,1,.4])
+c1,c2,c3,c4,c5,c6 = st.columns([1,1,1,1,1,.25])
 with c1:
     bu_opts = ['All']+sorted(df_raw[C_BU].astype(str).str.strip().replace({'':'nan'}).pipe(lambda s: s[s.ne('nan')]).unique().tolist())
     sel_bu = st.selectbox('BU', bu_opts, key='f_bu')
@@ -406,40 +412,43 @@ with c4:
         stype_opts += sorted([s for s in df_raw[C_STYPE].dropna().unique() if str(s).strip() not in ('','nan','None')])
     sel_st = st.selectbox('Supplier Type', stype_opts, key='f_st')
 with c5:
-    # Month filter — based on PO Date
     month_opts = ['All']
     if C_PO_DT and C_PO_DT in df_raw.columns:
         po_dates_all = pd.to_datetime(df_raw[C_PO_DT], errors='coerce')
         months_avail = (po_dates_all.dropna()
-                        .dt.to_period('M')
-                        .sort_values()
-                        .unique()
-                        .astype(str)
-                        .tolist())
+                        .dt.to_period('M').sort_values().unique().astype(str).tolist())
         month_opts += months_avail
     sel_month = st.selectbox('PO Month', month_opts, key='f_month')
 with c6:
-    st.markdown("<div style='padding-top:18px;'>", unsafe_allow_html=True)
-    if st.button("⟳ Refresh"): st.cache_data.clear(); st.rerun()
+    st.markdown("<div style='padding-top:22px;text-align:center;'>", unsafe_allow_html=True)
+    if st.button("⟳", help="Refresh data"): st.cache_data.clear(); st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
+# ── Apply BU / Category / Buyer / Supplier Type filters to ALL rows ──────────
+# Month filter applies ONLY to PO rows (rows with PO date filled).
+# PR counts and unclosed counts are NOT affected by month filter.
 dff = df_raw.copy()
 if sel_bu    != 'All': dff = dff[dff[C_BU]==sel_bu]
 if sel_cat   != 'All' and C_CAT: dff = dff[dff[C_CAT]==sel_cat]
 if sel_buyer != 'All' and C_HANDLER: dff = dff[dff[C_HANDLER]==sel_buyer]
 if sel_st    != 'All' and C_STYPE and C_STYPE in dff.columns: dff = dff[dff[C_STYPE]==sel_st]
-# Month filter applies to PO Date — only rows with a PO date in that month
-if sel_month != 'All' and C_PO_DT and C_PO_DT in dff.columns:
-    po_dt_s = pd.to_datetime(dff[C_PO_DT], errors='coerce')
-    dff = dff[po_dt_s.dt.to_period('M').astype(str) == sel_month]
 
-has_pr = pd.notna(dff[C_PR_DT]) if C_PR_DT else pd.Series(False,index=dff.index)
-has_po = pd.notna(dff[C_PO_DT]) if C_PO_DT else pd.Series(False,index=dff.index)
+# Compute PR/unclosed subsets BEFORE month filter (PRs don't have PO dates)
+has_pr_all = pd.notna(dff[C_PR_DT]) if C_PR_DT else pd.Series(False, index=dff.index)
+has_po_all = pd.notna(dff[C_PO_DT]) if C_PO_DT else pd.Series(False, index=dff.index)
+df_prs      = dff[has_pr_all].copy()
+df_unclosed = dff[has_pr_all & ~has_po_all].copy()
+n_prs       = len(df_prs)
+n_unclosed  = len(df_unclosed)
 
-df_prs      = dff[has_pr].copy()
-df_pos      = dff[has_po].copy()
-df_unclosed = dff[has_pr & ~has_po].copy()
-n_prs, n_pos, n_unclosed = len(df_prs), len(df_pos), len(df_unclosed)
+# Now apply month filter — ONLY to PO rows
+dff_po_base = dff[has_po_all].copy()
+if sel_month != 'All' and C_PO_DT and C_PO_DT in dff_po_base.columns:
+    po_dt_s = pd.to_datetime(dff_po_base[C_PO_DT], errors='coerce')
+    dff_po_base = dff_po_base[po_dt_s.dt.to_period('M').astype(str) == sel_month]
+
+df_pos  = dff_po_base.copy()
+n_pos   = len(df_pos)
 
 def ssum(df,col):
     if col and col in df.columns:
@@ -498,7 +507,9 @@ cn = dff[C_CAT].nunique() if C_CAT and C_CAT in dff.columns else 0
 sn = dff[C_SUPPLIER].nunique() if C_SUPPLIER and C_SUPPLIER in dff.columns else 0
 
 DK = dict(plot_bgcolor='rgba(0,0,0,0)',paper_bgcolor='rgba(0,0,0,0)',
-    font=dict(family='DM Sans',color='#888',size=12),
+    font=dict(family='DM Sans',color='#ddd',size=12),
+    xaxis=dict(gridcolor='rgba(255,255,255,.08)',tickcolor='#aaa',linecolor='#444',tickfont=dict(color='#ddd',size=11)),
+    yaxis=dict(gridcolor='rgba(255,255,255,.08)',tickcolor='#aaa',linecolor='#444',tickfont=dict(color='#ddd',size=11)),
     xaxis=dict(gridcolor='rgba(255,255,255,.04)',tickcolor='#444',linecolor='#333'),
     yaxis=dict(gridcolor='rgba(255,255,255,.04)',tickcolor='#444',linecolor='#333'),
     margin=dict(l=8,r=8,t=36,b=8))
@@ -542,7 +553,7 @@ with t1:
             fig.add_trace(go.Bar(name='Spend',x=bg[C_BU],y=bg['sc'],marker_color=RED,marker_line_width=0))
             if C_SAV: fig.add_trace(go.Bar(name='Savings',x=bg[C_BU],y=bg['svc'],marker_color='rgba(56,161,105,.7)',marker_line_width=0))
             apply_dk(fig,height=280,barmode='group',title_text='Spend & Savings by BU (Rs Cr)',
-                legend=dict(orientation='h',y=1.12,x=1,xanchor='right',bgcolor='rgba(0,0,0,0)',font=dict(color='#888',size=11)))
+                legend=dict(orientation='h',y=1.12,x=1,xanchor='right',bgcolor='rgba(0,0,0,0)',font=dict(color='#ddd',size=11)))
             st.plotly_chart(fig, width='stretch')
         else:
             st.markdown('<div class="info-box">No POs placed yet.</div>', unsafe_allow_html=True)
@@ -555,7 +566,7 @@ with t1:
                 cg=dff[C_CAT].value_counts().head(10).reset_index(); cg.columns=[C_CAT,'v']
                 lbl='PRs by Category'; txt=cg['v'].astype(str)
             fig2=go.Figure(go.Bar(y=cg[C_CAT],x=cg['v'],orientation='h',marker_color=RED,marker_line_width=0,
-                text=txt,textposition='outside',textfont=dict(color='#888',size=10)))
+                text=txt,textposition='outside',textfont=dict(color='#ddd',size=10)))
             apply_dk(fig2,height=280,title_text=lbl,showlegend=False)
             st.plotly_chart(fig2, width='stretch')
 
@@ -587,7 +598,7 @@ with t2:
             fig3.update_layout(**dk2,height=300,title_text='Monthly PO Trend',
                 yaxis=dict(title='Spend Cr',gridcolor='rgba(255,255,255,.04)'),
                 yaxis2=dict(title='Savings Cr',overlaying='y',side='right'),
-                legend=dict(orientation='h',y=1.12,x=1,xanchor='right',bgcolor='rgba(0,0,0,0)',font=dict(color='#888',size=11)))
+                legend=dict(orientation='h',y=1.12,x=1,xanchor='right',bgcolor='rgba(0,0,0,0)',font=dict(color='#ddd',size=11)))
             st.plotly_chart(fig3, width='stretch')
         else:
             st.markdown('<div class="info-box">Monthly trend will appear once PO dates are entered.</div>', unsafe_allow_html=True)
@@ -606,7 +617,7 @@ with t2:
         cg=df_pos.groupby(C_CAT).agg(sp=(C_PO_VAL,'sum'),sv=(C_SAV,'sum')).reset_index()
         cg['pct']=(cg['sv']/cg['sp']*100).fillna(0); cg=cg[cg['sp']>0].sort_values('pct',ascending=False)
         if len(cg)>0:
-            fig_c=go.Figure(go.Bar(x=cg[C_CAT],y=cg['pct'],marker_color=[GRN if v>=4.5 else RED for v in cg['pct']],marker_line_width=0,text=cg['pct'].apply(lambda x:f'{x:.1f}%'),textposition='outside',textfont=dict(color='#888',size=10)))
+            fig_c=go.Figure(go.Bar(x=cg[C_CAT],y=cg['pct'],marker_color=[GRN if v>=4.5 else RED for v in cg['pct']],marker_line_width=0,text=cg['pct'].apply(lambda x:f'{x:.1f}%'),textposition='outside',textfont=dict(color='#ddd',size=10)))
             fig_c.add_hline(y=4.5,line_dash='dash',line_color=AMB,annotation_text='4.5%',annotation_font_color=AMB)
             apply_dk(fig_c,height=260,title_text='Savings % by Category',showlegend=False)
             st.plotly_chart(fig_c, width='stretch')
@@ -626,7 +637,7 @@ with t3:
             tf=df_pos[[C_BU]].copy(); tf['_t']=tat_s; tf=tf.dropna(subset=['_t'])
             if len(tf)>0:
                 bt=tf.groupby(C_BU)['_t'].mean().reset_index(); bt.columns=['BU','TAT']
-                fig4=go.Figure(go.Bar(x=bt['BU'],y=bt['TAT'],marker_color=[GRN if v<=90 else RED for v in bt['TAT']],marker_line_width=0,text=bt['TAT'].apply(lambda x:f'{x:.0f}d'),textposition='outside',textfont=dict(color='#888',size=11)))
+                fig4=go.Figure(go.Bar(x=bt['BU'],y=bt['TAT'],marker_color=[GRN if v<=90 else RED for v in bt['TAT']],marker_line_width=0,text=bt['TAT'].apply(lambda x:f'{x:.0f}d'),textposition='outside',textfont=dict(color='#ddd',size=11)))
                 fig4.add_hline(y=90,line_dash='dash',line_color=AMB,annotation_text='90d',annotation_font_color=AMB)
                 apply_dk(fig4,height=280,title_text='Avg TAT by BU (days)',showlegend=False)
                 st.plotly_chart(fig4, width='stretch')
@@ -661,7 +672,7 @@ with t3:
             if len(v): rows.append({'BU':bu,'OTIF%':float((v<=1.05).sum()/len(v)*100)})
         if rows:
             bo=pd.DataFrame(rows)
-            fig5=go.Figure(go.Bar(x=bo['BU'],y=bo['OTIF%'],marker_color=[GRN if v>=75 else RED for v in bo['OTIF%']],marker_line_width=0,text=bo['OTIF%'].apply(lambda x:f'{x:.1f}%'),textposition='outside',textfont=dict(color='#888',size=11)))
+            fig5=go.Figure(go.Bar(x=bo['BU'],y=bo['OTIF%'],marker_color=[GRN if v>=75 else RED for v in bo['OTIF%']],marker_line_width=0,text=bo['OTIF%'].apply(lambda x:f'{x:.1f}%'),textposition='outside',textfont=dict(color='#ddd',size=11)))
             fig5.add_hline(y=75,line_dash='dash',line_color=AMB,annotation_text='75%',annotation_font_color=AMB)
             apply_dk(fig5,height=260,title_text='OTIF % by BU',showlegend=False,yaxis_range=[0,115])
             st.plotly_chart(fig5, width='stretch')
@@ -695,14 +706,14 @@ with t4:
         with c1:
             pt=df_pos[C_PAY].dropna().astype(str).str.strip(); pt=pt[pt.ne('')].value_counts().head(12).reset_index(); pt.columns=['Term','Count']
             if len(pt):
-                fig_pt=go.Figure(go.Bar(y=pt['Term'],x=pt['Count'],orientation='h',marker_color=BLU,marker_line_width=0,text=pt['Count'],textposition='outside',textfont=dict(color='#888',size=10)))
+                fig_pt=go.Figure(go.Bar(y=pt['Term'],x=pt['Count'],orientation='h',marker_color=BLU,marker_line_width=0,text=pt['Count'],textposition='outside',textfont=dict(color='#ddd',size=10)))
                 apply_dk(fig_pt,height=340,title_text='Payment Terms Distribution',showlegend=False)
                 st.plotly_chart(fig_pt, width='stretch')
         with c2:
             sv=wcs['_PayScore'].value_counts().sort_index().reset_index(); sv.columns=['Score','Count']
             lm={-2:'Advance',0:'On Dispatch/PDC',1:'IBC 90',2:'IBC 60',3:'VFS/CC15',4:'IBC 45/RXIL',5:'IFC/CC30/LC90',6:'IFC 90',7:'CC 45',8:'CC 60',10:'CC 90'}
             sv['Label']=sv['Score'].apply(lambda s:lm.get(int(s),str(s)))
-            fig_sc=go.Figure(go.Bar(x=sv['Label'],y=sv['Count'],marker_color=[RED if s<0 else (AMB if s<4 else GRN) for s in sv['Score']],marker_line_width=0,text=sv['Count'],textposition='outside',textfont=dict(color='#888',size=10)))
+            fig_sc=go.Figure(go.Bar(x=sv['Label'],y=sv['Count'],marker_color=[RED if s<0 else (AMB if s<4 else GRN) for s in sv['Score']],marker_line_width=0,text=sv['Count'],textposition='outside',textfont=dict(color='#ddd',size=10)))
             apply_dk(fig_sc,height=340,title_text='POs by WC Score Band',showlegend=False)
             st.plotly_chart(fig_sc, width='stretch')
     else:
@@ -741,7 +752,7 @@ with t5:
                 marker_color=[GRN if 10<=v<=15 else AMB for v in nv_bu['NV%']],
                 marker_line_width=0,
                 text=nv_bu['NV%'].apply(lambda x: f'{x:.1f}%'),
-                textposition='outside', textfont=dict(color='#888', size=11)
+                textposition='outside', textfont=dict(color='#ddd', size=11)
             ))
             fig8.add_hrect(y0=10, y1=15, fillcolor='rgba(56,161,105,.06)', line_width=0)
             apply_dk(fig8, height=280, title_text='NVD % by BU (filled rows only)',
@@ -759,8 +770,8 @@ with t5:
                 ))
                 fp2.update_layout(
                     paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                    font=dict(color='#888'), margin=dict(l=8,r=8,t=36,b=8),
-                    title_text='Supplier Type Mix', legend=dict(font=dict(color='#888',size=11), bgcolor='rgba(0,0,0,0)')
+                    font=dict(color='#ddd'), margin=dict(l=8,r=8,t=36,b=8),
+                    title_text='Supplier Type Mix', legend=dict(font=dict(color='#ddd',size=11), bgcolor='rgba(0,0,0,0)')
                 )
                 st.plotly_chart(fp2, width='stretch')
     else:
@@ -884,13 +895,13 @@ with t8:
         c1,c2=st.columns(2)
         with c1:
             bd=fp.groupby(C_BU).size().reset_index(name='Count').sort_values('Count',ascending=False)
-            f_p1=go.Figure(go.Bar(x=bd[C_BU],y=bd['Count'],marker_color=RED,marker_line_width=0,text=bd['Count'],textposition='outside',textfont=dict(color='#888',size=11)))
+            f_p1=go.Figure(go.Bar(x=bd[C_BU],y=bd['Count'],marker_color=RED,marker_line_width=0,text=bd['Count'],textposition='outside',textfont=dict(color='#ddd',size=11)))
             apply_dk(f_p1,height=260,title_text='Unclosed PRs by BU',showlegend=False)
             st.plotly_chart(f_p1, width='stretch')
         with c2:
             if C_CUR_ST and C_CUR_ST in fp.columns:
                 sd=fp[C_CUR_ST].fillna('(Blank)').value_counts().head(10).reset_index(); sd.columns=['Status','Count']
-                f_p2=go.Figure(go.Bar(y=sd['Status'],x=sd['Count'],orientation='h',marker_color=AMB,marker_line_width=0,text=sd['Count'],textposition='outside',textfont=dict(color='#888',size=10)))
+                f_p2=go.Figure(go.Bar(y=sd['Status'],x=sd['Count'],orientation='h',marker_color=AMB,marker_line_width=0,text=sd['Count'],textposition='outside',textfont=dict(color='#ddd',size=10)))
                 apply_dk(f_p2,height=260,title_text='By Current Status',showlegend=False)
                 st.plotly_chart(f_p2, width='stretch')
         if fp['_age'].notna().any():
@@ -898,7 +909,7 @@ with t8:
             clrs=[GRN,AMB,AMB,RED,'#ff0000']
             fp=fp.copy(); fp['_bucket']=pd.cut(fp['_age'],bins=bins,labels=lbls)
             ab=fp['_bucket'].value_counts().reindex(lbls,fill_value=0).reset_index(); ab.columns=['Bucket','Count']
-            f_ab=go.Figure(go.Bar(x=ab['Bucket'],y=ab['Count'],marker_color=clrs,marker_line_width=0,text=ab['Count'],textposition='outside',textfont=dict(color='#888',size=11)))
+            f_ab=go.Figure(go.Bar(x=ab['Bucket'],y=ab['Count'],marker_color=clrs,marker_line_width=0,text=ab['Count'],textposition='outside',textfont=dict(color='#ddd',size=11)))
             apply_dk(f_ab,height=240,title_text='PR Age Buckets',showlegend=False)
             st.plotly_chart(f_ab, width='stretch')
         show_c=[c for c in ['SN',C_BU,'Project Name',C_ITEMS,C_CAT,C_HANDLER,C_PR_DT,C_REV_PR,C_NFA_DT,C_NFA_APP,C_CUR_ST,'_rev_delay','_age'] if c and c in fp.columns]
