@@ -510,8 +510,6 @@ DK = dict(plot_bgcolor='rgba(0,0,0,0)',paper_bgcolor='rgba(0,0,0,0)',
     font=dict(family='DM Sans',color='#ddd',size=12),
     xaxis=dict(gridcolor='rgba(255,255,255,.08)',tickcolor='#aaa',linecolor='#444',tickfont=dict(color='#ddd',size=11)),
     yaxis=dict(gridcolor='rgba(255,255,255,.08)',tickcolor='#aaa',linecolor='#444',tickfont=dict(color='#ddd',size=11)),
-    xaxis=dict(gridcolor='rgba(255,255,255,.04)',tickcolor='#444',linecolor='#333'),
-    yaxis=dict(gridcolor='rgba(255,255,255,.04)',tickcolor='#444',linecolor='#333'),
     margin=dict(l=8,r=8,t=36,b=8))
 RED,GRN,AMB,BLU,PUR='#e53e3e','#38a169','#d69e2e','#3182ce','#805ad5'
 
