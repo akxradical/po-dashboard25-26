@@ -578,47 +578,140 @@ with t1:
 
 # ════ TAB 2 — SPEND & SAVINGS ════════════════════════════════
 with t2:
-    c1,c2,c3,c4=st.columns(4)
-    with c1: st.metric("Total Spend",f"Rs {spend:.2f} Cr")
-    with c2: st.metric("Total Savings",f"Rs {savings:.2f} Cr",f"{sav_pct:.1f}%")
-    with c3: st.metric("vs Target 4.5%",f"{sav_pct:.1f}%",f"{sav_pct-4.5:+.1f}pp")
-    with c4: st.metric("POs / PRs",f"{n_pos} / {n_prs}")
-    c1,c2=st.columns(2)
-    with c1:
-        if C_PO_DT and C_PO_VAL and len(df_pos)>0:
-            tmp=df_pos.copy(); tmp['_m']=pd.to_datetime(tmp[C_PO_DT],errors='coerce').dt.to_period('M').astype(str)
-            mo=tmp.groupby('_m').agg(sp=(C_PO_VAL,'sum'),sv=(C_SAV,'sum') if C_SAV else (C_PO_VAL,'count')).reset_index().sort_values('_m')
-            mo['sc']=mo['sp']/1e7; mo['svc']=mo['sv']/1e7 if C_SAV else 0
-            fig3=go.Figure()
-            fig3.add_trace(go.Bar(name='Spend',x=mo['_m'],y=mo['sc'],marker_color='rgba(229,62,62,.3)',marker_line_width=0))
-            if C_SAV: fig3.add_trace(go.Scatter(name='Savings',x=mo['_m'],y=mo['svc'],line=dict(color=GRN,width=2.5),mode='lines+markers',marker=dict(size=5),yaxis='y2'))
-            dk2={k:v for k,v in DK.items() if k!='yaxis'}
-            fig3.update_layout(**dk2,height=300,title_text='Monthly PO Trend',
-                yaxis=dict(title='Spend Cr',gridcolor='rgba(255,255,255,.04)'),
-                yaxis2=dict(title='Savings Cr',overlaying='y',side='right'),
-                legend=dict(orientation='h',y=1.12,x=1,xanchor='right',bgcolor='rgba(0,0,0,0)',font=dict(color='#ddd',size=11)))
-            st.plotly_chart(fig3, width='stretch')
-        else:
-            st.markdown('<div class="info-box">Monthly trend will appear once PO dates are entered.</div>', unsafe_allow_html=True)
-    with c2:
-        if C_PO_VAL and len(df_pos)>0:
-            bs=df_pos.groupby(C_BU).agg(n=(C_PO_VAL,'count'),sp=(C_PO_VAL,'sum'),sv=(C_SAV,'sum') if C_SAV else (C_PO_VAL,'count')).reset_index()
-            bs['pct']=(bs['sv']/bs['sp']*100).fillna(0) if C_SAV else 0
-            rh=""
-            for _,r in bs.sort_values('sp',ascending=False).iterrows():
-                pill="pg" if r['pct']>=4.5 else ("pr" if r['pct']<0 else "pa")
-                sv_s=f"Rs {r['sv']/1e7:.2f}Cr" if C_SAV else "—"
-                rh+=(f'<tr><td><b style="color:#eee">{r[C_BU]}</b></td><td class="mn">Rs {r["sp"]/1e7:.2f}Cr</td>'
-                     f'<td class="mn">{sv_s}</td><td><span class="{pill}">{r["pct"]:.1f}%</span></td><td class="mn">{int(r["n"])}</td></tr>')
-            st.markdown(f'<div style="background:#13131a;border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:6px 0;"><table class="zT"><thead><tr><th>BU</th><th>Spend</th><th>Savings</th><th>%</th><th>POs</th></tr></thead><tbody>{rh}</tbody></table></div>', unsafe_allow_html=True)
-    if C_SAV and C_PO_VAL and C_CAT and len(df_pos)>0:
-        cg=df_pos.groupby(C_CAT).agg(sp=(C_PO_VAL,'sum'),sv=(C_SAV,'sum')).reset_index()
-        cg['pct']=(cg['sv']/cg['sp']*100).fillna(0); cg=cg[cg['sp']>0].sort_values('pct',ascending=False)
-        if len(cg)>0:
-            fig_c=go.Figure(go.Bar(x=cg[C_CAT],y=cg['pct'],marker_color=[GRN if v>=4.5 else RED for v in cg['pct']],marker_line_width=0,text=cg['pct'].apply(lambda x:f'{x:.1f}%'),textposition='outside',textfont=dict(color='#ddd',size=10)))
-            fig_c.add_hline(y=4.5,line_dash='dash',line_color=AMB,annotation_text='4.5%',annotation_font_color=AMB)
-            apply_dk(fig_c,height=260,title_text='Savings % by Category',showlegend=False)
-            st.plotly_chart(fig_c, width='stretch')
+    # ── Header metrics row ────────────────────────────────────
+    st.markdown(f"""<div style="background:#13131a;border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:14px 20px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;">
+<div style="font-size:10px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:.1em;">FY'27 Actuals &nbsp;|&nbsp; All values Rs Crores</div>
+<div style="display:flex;gap:32px;">
+  <div style="text-align:center;"><div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.08em;">Total Spend</div><div style="font-size:20px;font-weight:800;color:#fff;font-family:'DM Mono',monospace;">Rs {spend:.2f} Cr</div></div>
+  <div style="text-align:center;"><div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.08em;">Total Savings</div><div style="font-size:20px;font-weight:800;color:#68d391;font-family:'DM Mono',monospace;">Rs {savings:.2f} Cr</div></div>
+  <div style="text-align:center;"><div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.08em;">Savings Rate</div><div style="font-size:20px;font-weight:800;color:{'#68d391' if sav_pct>=4.5 else '#fc8181'};font-family:'DM Mono',monospace;">{sav_pct:.2f}%</div></div>
+  <div style="text-align:center;"><div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.08em;">vs Target 4.5%</div><div style="font-size:20px;font-weight:800;color:{'#68d391' if sav_pct>=4.5 else '#fc8181'};font-family:'DM Mono',monospace;">{sav_pct-4.5:+.2f}pp</div></div>
+  <div style="text-align:center;"><div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.08em;">POs Placed</div><div style="font-size:20px;font-weight:800;color:#fff;font-family:'DM Mono',monospace;">{n_pos}</div></div>
+</div></div>""", unsafe_allow_html=True)
+
+    # ── BU cards ──────────────────────────────────────────────
+    if C_PO_VAL and len(df_pos) > 0:
+        bu_list = sorted(df_pos[C_BU].dropna().unique().tolist())
+        cols = st.columns(len(bu_list)) if len(bu_list) <= 5 else st.columns(4)
+
+        for i, bu in enumerate(bu_list):
+            bu_df = df_pos[df_pos[C_BU] == bu]
+            bu_sp  = ssum(bu_df, C_PO_VAL) / 1e7
+            bu_sv  = ssum(bu_df, C_SAV)    / 1e7
+            bu_pct = (bu_sv / bu_sp * 100) if bu_sp > 0 else 0.0
+            bu_n   = len(bu_df)
+
+            # Status pill
+            if bu_pct >= 4.5:
+                pill_color, pill_bg, pill_txt = '#68d391', 'rgba(56,161,105,.15)', 'ON TARGET'
+                bar_color = '#38a169'
+            elif bu_pct > 0:
+                pill_color, pill_bg, pill_txt = '#f6e05e', 'rgba(214,158,46,.15)', 'WATCH'
+                bar_color = '#d69e2e'
+            elif bu_pct < 0:
+                pill_color, pill_bg, pill_txt = '#fc8181', 'rgba(229,62,62,.15)', 'AT RISK'
+                bar_color = '#e53e3e'
+            else:
+                pill_color, pill_bg, pill_txt = '#63b3ed', 'rgba(49,130,206,.15)', 'NEW'
+                bar_color = '#3182ce'
+
+            # Category breakdown
+            cat_html = ''
+            if C_CAT and C_CAT in bu_df.columns and C_SAV and C_SAV in bu_df.columns:
+                cat_grp = bu_df.groupby(C_CAT).agg(
+                    sp=(C_PO_VAL,'sum'), sv=(C_SAV,'sum')
+                ).reset_index().sort_values('sp', ascending=False).head(4)
+                for _, row in cat_grp.iterrows():
+                    cp = (row['sv']/row['sp']*100) if row['sp']>0 else 0
+                    cc = '#68d391' if cp>=4.5 else ('#fc8181' if cp<0 else '#f6e05e')
+                    cat_html += f'''<tr>
+<td style="padding:5px 0;font-size:11px;color:#ccc;">{row[C_CAT]}</td>
+<td style="padding:5px 0;font-size:11px;color:#fff;font-family:'DM Mono',monospace;text-align:right;">Rs {row['sp']/1e7:.2f}Cr</td>
+<td style="padding:5px 0;font-size:11px;font-family:'DM Mono',monospace;text-align:right;color:{cc};">{cp:.1f}%</td>
+</tr>'''
+
+            with cols[i % len(cols)]:
+                st.markdown(f"""<div style="background:#13131a;border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:16px;border-top:3px solid {bar_color};height:100%;">
+<!-- BU header -->
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+  <div style="font-size:18px;font-weight:800;color:#fff;">{bu}</div>
+  <div style="background:{pill_bg};color:{pill_color};border:1px solid {pill_color}33;padding:3px 10px;border-radius:5px;font-size:9px;font-weight:800;letter-spacing:.1em;">{pill_txt}</div>
+</div>
+<!-- Key metrics -->
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;">
+  <div style="background:rgba(255,255,255,.03);border-radius:8px;padding:8px 10px;">
+    <div style="font-size:8px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px;">PO Spend</div>
+    <div style="font-size:16px;font-weight:800;color:#fff;font-family:'DM Mono',monospace;">Rs {bu_sp:.2f}Cr</div>
+  </div>
+  <div style="background:rgba(255,255,255,.03);border-radius:8px;padding:8px 10px;">
+    <div style="font-size:8px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px;">Savings</div>
+    <div style="font-size:16px;font-weight:800;color:{bar_color};font-family:'DM Mono',monospace;">Rs {bu_sv:.2f}Cr</div>
+  </div>
+  <div style="background:rgba(255,255,255,.03);border-radius:8px;padding:8px 10px;">
+    <div style="font-size:8px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px;">Rate</div>
+    <div style="font-size:16px;font-weight:800;color:{pill_color};font-family:'DM Mono',monospace;">{bu_pct:.1f}%</div>
+  </div>
+</div>
+<!-- Savings progress bar -->
+<div style="margin-bottom:12px;">
+  <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+    <span style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.06em;">Savings Rate</span>
+    <span style="font-size:9px;color:#555;">Target 4.5%</span>
+  </div>
+  <div style="background:rgba(255,255,255,.06);border-radius:3px;height:5px;overflow:hidden;">
+    <div style="width:{min(bu_pct/10*100,100):.0f}%;height:100%;background:{bar_color};border-radius:3px;transition:width 1s ease;"></div>
+  </div>
+</div>
+<!-- Category table -->
+{f'<div style="border-top:1px solid rgba(255,255,255,.05);padding-top:10px;"><table style="width:100%;border-collapse:collapse;"><thead><tr><th style="font-size:8px;color:#555;text-transform:uppercase;letter-spacing:.06em;padding:0 0 5px 0;text-align:left;">Category</th><th style="font-size:8px;color:#555;text-transform:uppercase;letter-spacing:.06em;padding:0 0 5px 0;text-align:right;">Spend</th><th style="font-size:8px;color:#555;text-transform:uppercase;letter-spacing:.06em;padding:0 0 5px 0;text-align:right;">Savings%</th></tr></thead><tbody>{cat_html}</tbody></table></div>' if cat_html else ''}
+<!-- PO count footer -->
+<div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.04);font-size:9px;color:#555;">{bu_n} PO{'s' if bu_n!=1 else ''} placed</div>
+</div>""", unsafe_allow_html=True)
+
+    else:
+        st.markdown('<div class="info-box">No POs placed yet — spend data will appear once PO dates are filled.</div>', unsafe_allow_html=True)
+
+    # ── Monthly trend ─────────────────────────────────────────
+    st.markdown("<div style='margin-top:16px;'></div>", unsafe_allow_html=True)
+    if C_PO_DT and C_PO_VAL and len(df_pos) > 0:
+        tmp = df_pos.copy()
+        tmp['_m'] = pd.to_datetime(tmp[C_PO_DT], errors='coerce').dt.to_period('M').astype(str)
+        mo = tmp.groupby('_m').agg(
+            sp=(C_PO_VAL,'sum'),
+            sv=(C_SAV,'sum') if C_SAV else (C_PO_VAL,'count')
+        ).reset_index().sort_values('_m')
+        mo['sc'] = mo['sp']/1e7
+        mo['svc'] = mo['sv']/1e7 if C_SAV else 0
+        mo['sav_pct'] = (mo['sv']/mo['sp']*100).fillna(0) if C_SAV else 0
+
+        fig3 = go.Figure()
+        fig3.add_trace(go.Bar(
+            name='Spend', x=mo['_m'], y=mo['sc'],
+            marker_color='rgba(229,62,62,.35)', marker_line_width=0,
+            text=mo['sc'].apply(lambda x: f'Rs {x:.2f}Cr'),
+            textposition='outside', textfont=dict(color='#ddd', size=10)
+        ))
+        if C_SAV:
+            fig3.add_trace(go.Scatter(
+                name='Savings %', x=mo['_m'], y=mo['sav_pct'],
+                line=dict(color=GRN, width=2.5),
+                mode='lines+markers', marker=dict(size=6, color=GRN),
+                yaxis='y2',
+                text=mo['sav_pct'].apply(lambda x: f'{x:.1f}%'),
+                textposition='top center', textfont=dict(color=GRN, size=10)
+            ))
+        dk2 = {k: v for k, v in DK.items() if k != 'yaxis'}
+        fig3.update_layout(
+            **dk2, height=280, title_text='Monthly PO Spend & Savings Rate',
+            yaxis=dict(title='Spend (Rs Cr)', gridcolor='rgba(255,255,255,.08)',
+                       tickfont=dict(color='#ddd'), titlefont=dict(color='#ddd')),
+            yaxis2=dict(title='Savings %', overlaying='y', side='right',
+                        tickfont=dict(color=GRN), titlefont=dict(color=GRN),
+                        showgrid=False),
+            legend=dict(orientation='h', y=1.12, x=1, xanchor='right',
+                        bgcolor='rgba(0,0,0,0)', font=dict(color='#ddd', size=11))
+        )
+        st.plotly_chart(fig3, width='stretch')
 
 # ════ TAB 3 — TAT & OTIF ════════════════════════════════════
 with t3:
