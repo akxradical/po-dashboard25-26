@@ -81,7 +81,16 @@ def load_po_tracker():
         data = ws.get_all_values(value_render_option='FORMATTED_VALUE')
         if len(data) < 2: return pd.DataFrame(), "Sheet is empty"
 
-        raw_h = [str(h).strip() if h else '' for h in data[0]]
+        # Auto-detect the header row — find the row that contains 'BU' and 'SN'
+        # (the sheet sometimes has a blank/title row above the headers)
+        hdr_idx = 0
+        for idx in range(min(5, len(data))):
+            row_vals = [str(x).strip().upper() for x in data[idx]]
+            if 'BU' in row_vals and ('SN' in row_vals or 'PROJECT NAME' in row_vals):
+                hdr_idx = idx
+                break
+
+        raw_h = [str(h).strip() if h else '' for h in data[hdr_idx]]
         seen = {}
         headers = []
         for h in raw_h:
@@ -89,7 +98,7 @@ def load_po_tracker():
             if h in seen: seen[h] += 1; h = f'{h}_{seen[h]}'
             else: seen[h] = 0
             headers.append(h)
-        df = pd.DataFrame(data[1:], columns=headers)
+        df = pd.DataFrame(data[hdr_idx+1:], columns=headers)
 
         # Filter real rows by BU
         bu_col = next((c for c in df.columns if c.strip().upper()=='BU'), None)
