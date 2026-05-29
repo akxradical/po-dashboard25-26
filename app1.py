@@ -712,11 +712,12 @@ with t2:
         dk2 = {k: v for k, v in DK.items() if k != 'yaxis'}
         fig3.update_layout(
             **dk2, height=280, title_text='Monthly PO Spend & Savings Rate',
-            yaxis=dict(title='Spend (Rs Cr)', gridcolor='rgba(255,255,255,.08)',
-                       tickfont=dict(color='#ddd'), titlefont=dict(color='#ddd')),
-            yaxis2=dict(title='Savings %', overlaying='y', side='right',
-                        tickfont=dict(color=GRN), titlefont=dict(color=GRN),
-                        showgrid=False),
+            yaxis=dict(title=dict(text='Spend (Rs Cr)', font=dict(color='#ddd')),
+                       gridcolor='rgba(255,255,255,.08)',
+                       tickfont=dict(color='#ddd')),
+            yaxis2=dict(title=dict(text='Savings %', font=dict(color=GRN)),
+                        overlaying='y', side='right',
+                        tickfont=dict(color=GRN), showgrid=False),
             legend=dict(orientation='h', y=1.12, x=1, xanchor='right',
                         bgcolor='rgba(0,0,0,0)', font=dict(color='#ddd', size=11))
         )
