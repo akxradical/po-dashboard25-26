@@ -149,6 +149,22 @@ def load_po_tracker():
             mask_ao_empty = df[sup_ao].astype(str).str.strip().isin(['','nan','None'])
             df.loc[mask_ao_empty, sup_ao] = df.loc[mask_ao_empty, sup_o].values
 
+        # Normalize supplier type spellings: NV OEM / NV-OEM / NV–OEM → "NV-OEM",
+        # NV TRADER / NV - TRADER → "NV-TRADER", same for AVL. Collapses dropdown variants.
+        def _norm_stype(v):
+            if v is None: return ''
+            s = str(v).strip().upper().replace('–','-').replace('—','-')
+            s = ' '.join(s.split())  # collapse whitespace
+            if not s or s in ('NAN','NONE'): return ''
+            if 'NV' in s and 'TRADER' in s: return 'NV-TRADER'
+            if 'NV' in s and 'OEM' in s:    return 'NV-OEM'
+            if 'AVL' in s and 'TRADER' in s:return 'AVL-TRADER'
+            if 'AVL' in s and 'OEM' in s:   return 'AVL-OEM'
+            if 'CIVIL' in s:                return 'Civil Contractor'
+            return str(v).strip()  # keep original if unrecognized
+        for _sc in [c for c in (sup_o, sup_ao) if c and c in df.columns]:
+            df[_sc] = df[_sc].apply(_norm_stype)
+
         # Payment score
         pay_col = next((c for c in df.columns if 'payment' in c.lower() and 'term' in c.lower()), None)
         if pay_col:
@@ -443,14 +459,19 @@ if sel_buyer != 'All' and C_HANDLER: dff = dff[dff[C_HANDLER]==sel_buyer]
 if sel_st    != 'All' and C_STYPE and C_STYPE in dff.columns: dff = dff[dff[C_STYPE]==sel_st]
 
 # Compute PR/unclosed subsets BEFORE month filter (PRs don't have PO dates)
+# A PO is "placed" if it has a PO Date OR a PO Basic Value filled — this
+# captures rows where the buyer entered the value but not yet the date,
+# so totals match the sheet's own SUM exactly.
 has_pr_all = pd.notna(dff[C_PR_DT]) if C_PR_DT else pd.Series(False, index=dff.index)
-has_po_all = pd.notna(dff[C_PO_DT]) if C_PO_DT else pd.Series(False, index=dff.index)
+has_podate = pd.notna(dff[C_PO_DT]) if C_PO_DT else pd.Series(False, index=dff.index)
+has_poval  = (pd.to_numeric(dff[C_PO_VAL], errors='coerce').fillna(0) > 0) if C_PO_VAL else pd.Series(False, index=dff.index)
+has_po_all = has_podate | has_poval
 df_prs      = dff[has_pr_all].copy()
 df_unclosed = dff[has_pr_all & ~has_po_all].copy()
 n_prs       = len(df_prs)
 n_unclosed  = len(df_unclosed)
 
-# Now apply month filter — ONLY to PO rows
+# Now apply month filter — ONLY to PO rows (by PO date)
 dff_po_base = dff[has_po_all].copy()
 if sel_month != 'All' and C_PO_DT and C_PO_DT in dff_po_base.columns:
     po_dt_s = pd.to_datetime(dff_po_base[C_PO_DT], errors='coerce')
