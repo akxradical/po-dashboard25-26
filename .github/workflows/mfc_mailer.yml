@@ -30,21 +30,18 @@ jobs:
       - name: Install dependencies
         run: pip install gspread google-auth pandas
 
-      - name: Write secrets.toml
-        run: |
-          printf '%s' "${{ secrets.SECRETS_TOML }}" > secrets.toml
-
       - name: Run mailer
+        env:
+          MODE: ${{ github.event.inputs.mode }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASS: ${{ secrets.GMAIL_APP_PASS }}
+          GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+          TEST_EMAIL: ${{ secrets.TEST_EMAIL }}
         run: |
-          MODE="${{ github.event.inputs.mode }}"
           if [ "$MODE" = "test" ]; then
-            python mfc_alert_mailer.py --test "${{ secrets.TEST_EMAIL }}"
-          elif [ "$MODE" = "dry-run" ]; then
-            python mfc_alert_mailer.py --dry-run
-          else
+            python mfc_alert_mailer.py --test "$TEST_EMAIL"
+          elif [ "$MODE" = "live" ]; then
             python mfc_alert_mailer.py
+          else
+            python mfc_alert_mailer.py --dry-run
           fi
-
-      - name: Clean up
-        if: always()
-        run: rm -f secrets.toml
