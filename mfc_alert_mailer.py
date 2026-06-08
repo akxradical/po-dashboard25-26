@@ -59,14 +59,25 @@ except ModuleNotFoundError:
 # ════════════════════════════════════════════════════════════════════════
 def _load_secrets():
     # If the individual env vars are present (GitHub Actions), use them.
-    if os.getenv("GMAIL_USER") and os.getenv("GCP_SERVICE_ACCOUNT_JSON"):
-        sa = json.loads(os.getenv("GCP_SERVICE_ACCOUNT_JSON"))
+    gu = os.getenv("GMAIL_USER")
+    gj = os.getenv("GCP_SERVICE_ACCOUNT_JSON")
+    if gu and gj:
+        sa = json.loads(gj)
         return {
-            "gmail_user":     os.getenv("GMAIL_USER"),
+            "gmail_user":     gu,
             "gmail_app_pass": os.getenv("GMAIL_APP_PASS", ""),
             "gcp_service_account": sa,
         }
-    # Otherwise load the local secrets.toml file.
+    # If we're clearly on a CI runner but env vars are missing, fail loudly.
+    if os.getenv("GITHUB_ACTIONS") == "true":
+        missing = [n for n in ("GMAIL_USER", "GMAIL_APP_PASS", "GCP_SERVICE_ACCOUNT_JSON")
+                   if not os.getenv(n)]
+        raise RuntimeError(
+            "Running on GitHub Actions but these secrets are missing/empty: "
+            + ", ".join(missing)
+            + ". Add them under Settings → Secrets and variables → Actions, "
+            + "with EXACTLY these names.")
+    # Otherwise load the local secrets.toml file (for running on your own machine).
     path = os.getenv("SECRETS_PATH", "secrets.toml")
     with open(path, "rb") as f:
         return tomllib.load(f)
@@ -88,6 +99,7 @@ GSHEET_TAB = os.getenv("GSHEET_TAB", "PO TRACKER  27")          # note: TWO spac
 # Managers — receive consolidated mail (all buyers, grouped by buyer)
 MANAGER_EMAILS = [
     "ramsundar.a@zetwerk.in",
+    "santhosh.r@zetwerk.com",
 ]
 
 # Buyer name (exactly as in "Handled by" column)  →  email
