@@ -338,8 +338,11 @@ def build_buyer_email(buyer, df_own):
           <div style="font-size:15px;font-weight:700;color:#38a169;margin-top:8px;">No deliveries to track right now.</div></div>"""
     n_o = int((df_own["Status"] == "OVERDUE").sum())
     n_r = int((df_own["Status"] == "RED").sum())
-    greeting = (f"Hi {buyer}, here is your delivery status. "
-                f"{'<b style=\"color:#e53e3e;\">' + str(n_o+n_r) + ' need urgent follow-up.</b>' if (n_o+n_r) else 'Nothing urgent today.'}")
+    if (n_o + n_r) > 0:
+        urgent = '<b style="color:#e53e3e;">' + str(n_o + n_r) + ' need urgent follow-up.</b>'
+    else:
+        urgent = 'Nothing urgent today.'
+    greeting = f"Hi {buyer}, here is your delivery status. {urgent}"
     html = shell(buyer, today_str, greeting, body, df_own)
     subj = (f"🔴 Your MFC Report: {n_o} overdue, {n_r} critical — {today_str}"
             if (n_o or n_r) else f"MFC Report: all on track — {today_str}")
@@ -383,8 +386,8 @@ def build_manager_email(df_all):
 
     n_o = int((df_all["Status"] == "OVERDUE").sum())
     n_r = int((df_all["Status"] == "RED").sum())
-    greeting = (f"Team-wide delivery status across all buyers. "
-                f"<b style=\"color:#e53e3e;\">{n_o+n_r} POs need urgent attention.</b>")
+    greeting = ("Team-wide delivery status across all buyers. "
+                "<b style='color:#e53e3e;'>" + str(n_o + n_r) + " POs need urgent attention.</b>")
     html = shell("All Buyers", today_str, greeting, blocks, df_all)
     subj = f"🔴 CAT-2 MFC Report: {n_o} overdue, {n_r} critical — {today_str}"
     return subj, html
