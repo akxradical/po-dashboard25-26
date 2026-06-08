@@ -1,0 +1,50 @@
+name: CAT-2 MFC Mailer
+
+on:
+  schedule:
+    - cron: "30 2 * * 1"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Run mode"
+        required: true
+        default: "dry-run"
+        type: choice
+        options:
+          - dry-run
+          - test
+          - live
+
+jobs:
+  send-mfc-alerts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install gspread google-auth pandas
+
+      - name: Write secrets.toml
+        run: |
+          printf '%s' "${{ secrets.SECRETS_TOML }}" > secrets.toml
+
+      - name: Run mailer
+        run: |
+          MODE="${{ github.event.inputs.mode }}"
+          if [ "$MODE" = "test" ]; then
+            python mfc_alert_mailer.py --test "${{ secrets.TEST_EMAIL }}"
+          elif [ "$MODE" = "dry-run" ]; then
+            python mfc_alert_mailer.py --dry-run
+          else
+            python mfc_alert_mailer.py
+          fi
+
+      - name: Clean up
+        if: always()
+        run: rm -f secrets.toml
