@@ -49,24 +49,34 @@ from google.oauth2.service_account import Credentials
 # TOML reader (Python 3.11+ has tomllib built in; else pip install tomli)
 try:
     import tomllib
-    def _load_toml(path):
-        with open(path, "rb") as f:
-            return tomllib.load(f)
 except ModuleNotFoundError:
-    import tomli
-    def _load_toml(path):
-        with open(path, "rb") as f:
-            return tomli.load(f)
+    import tomli as tomllib
 
 # ════════════════════════════════════════════════════════════════════════
-#  SECRETS — loaded from secrets.toml (keep that file private, git-ignored)
+#  SECRETS
+#  Priority 1: individual environment variables (GitHub Actions secrets)
+#  Priority 2: a local secrets.toml file (for running on your own machine)
 # ════════════════════════════════════════════════════════════════════════
-_SECRETS_PATH = os.getenv("SECRETS_PATH", "secrets.toml")
-_S = _load_toml(_SECRETS_PATH)
+def _load_secrets():
+    # If the individual env vars are present (GitHub Actions), use them.
+    if os.getenv("GMAIL_USER") and os.getenv("GCP_SERVICE_ACCOUNT_JSON"):
+        sa = json.loads(os.getenv("GCP_SERVICE_ACCOUNT_JSON"))
+        return {
+            "gmail_user":     os.getenv("GMAIL_USER"),
+            "gmail_app_pass": os.getenv("GMAIL_APP_PASS", ""),
+            "gcp_service_account": sa,
+        }
+    # Otherwise load the local secrets.toml file.
+    path = os.getenv("SECRETS_PATH", "secrets.toml")
+    with open(path, "rb") as f:
+        return tomllib.load(f)
+
+
+_S = _load_secrets()
 
 GMAIL_USER     = _S["gmail_user"]
 GMAIL_APP_PASS = _S["gmail_app_pass"]
-SERVICE_INFO   = dict(_S["gcp_service_account"])   # service account as a dict
+SERVICE_INFO   = dict(_S["gcp_service_account"])
 SENDER_NAME    = "CAT-2 Procurement Dashboard"
 
 # ════════════════════════════════════════════════════════════════════════
