@@ -48,6 +48,11 @@ def calc_score(term):
         if k in t: return float(v)
     return None
 
+# Prior-year (FY25-26) actuals from CPT CAT-2 PR-RFQ-PO-Delivery Tracker (02Apr2026).
+# Used for YoY comparison in Spend & Savings tab. Values in Rs Crore.
+# BU name mapping: ZAP91->ZAP 91. O&G existed last year (not this year). E&R is new this year.
+PREV_YEAR = {"fy_total":{"spend":515.1473,"savings":29.5982,"pos":590},"bu_total":{"O&G":{"spend":179.3521,"savings":6.6605,"pos":271},"Water":{"spend":213.421,"savings":16.761,"pos":100},"Railways":{"spend":66.6823,"savings":5.1632,"pos":170},"ZAP91":{"spend":25.3602,"savings":0.822,"pos":33},"GFB":{"spend":26.186,"savings":0.6212,"pos":12},"T&D":{"spend":4.1456,"savings":-0.4297,"pos":4}},"bu_month":{"O&G":{"04":{"spend":1.7522,"savings":-0.009,"pos":14},"10":{"spend":12.1427,"savings":-0.0674,"pos":17},"05":{"spend":7.5541,"savings":-0.5526,"pos":11},"03":{"spend":19.2703,"savings":0.0,"pos":44},"08":{"spend":35.3137,"savings":0.2919,"pos":18},"06":{"spend":3.9379,"savings":0.4702,"pos":9},"07":{"spend":6.0857,"savings":0.2398,"pos":13},"09":{"spend":9.3671,"savings":0.8374,"pos":25},"11":{"spend":37.9937,"savings":1.3641,"pos":33},"02":{"spend":7.3299,"savings":0.0731,"pos":37},"12":{"spend":30.9806,"savings":3.7814,"pos":27},"01":{"spend":7.6242,"savings":0.2316,"pos":23}},"Water":{"04":{"spend":38.0936,"savings":6.5428,"pos":9},"05":{"spend":160.526,"savings":9.3777,"pos":17},"09":{"spend":0.6212,"savings":0.0,"pos":6},"02":{"spend":2.1535,"savings":0.0,"pos":8},"12":{"spend":3.5421,"savings":0.0,"pos":11},"03":{"spend":0.839,"savings":0.0,"pos":5},"07":{"spend":0.9438,"savings":0.1088,"pos":7},"08":{"spend":0.4906,"savings":0.2625,"pos":3},"01":{"spend":2.8774,"savings":0.0,"pos":11},"06":{"spend":2.4557,"savings":0.2011,"pos":11},"11":{"spend":0.5624,"savings":0.1181,"pos":5},"10":{"spend":0.3157,"savings":0.15,"pos":7}},"Railways":{"06":{"spend":14.277,"savings":2.4319,"pos":22},"09":{"spend":5.887,"savings":2.103,"pos":14},"04":{"spend":2.6079,"savings":0.1742,"pos":23},"07":{"spend":2.1588,"savings":-0.169,"pos":13},"05":{"spend":1.566,"savings":0.0372,"pos":15},"08":{"spend":1.6325,"savings":0.1144,"pos":7},"10":{"spend":7.7903,"savings":-1.533,"pos":12},"11":{"spend":3.0303,"savings":0.8422,"pos":12},"12":{"spend":2.1894,"savings":0.6107,"pos":9},"01":{"spend":19.763,"savings":-0.9539,"pos":16},"02":{"spend":3.0365,"savings":0.8152,"pos":14},"03":{"spend":2.7435,"savings":0.6903,"pos":13}},"ZAP91":{"10":{"spend":12.672,"savings":-0.195,"pos":5},"11":{"spend":4.7893,"savings":1.017,"pos":15},"12":{"spend":0.6162,"savings":0.0,"pos":3},"01":{"spend":1.9012,"savings":0.0,"pos":4},"02":{"spend":0.6145,"savings":0.0,"pos":1},"03":{"spend":4.767,"savings":0.0,"pos":5}},"GFB":{"01":{"spend":18.7372,"savings":0.29,"pos":4},"02":{"spend":5.52,"savings":-0.08,"pos":3},"03":{"spend":1.9288,"savings":0.4112,"pos":5}}}}
+
 def gclient():
     creds = Credentials.from_service_account_info(
         dict(st.secrets["gcp_service_account"]), scopes=SCOPES)
@@ -609,13 +614,27 @@ with t1:
 # ════ TAB 2 — SPEND & SAVINGS ════════════════════════════════
 with t2:
     # ── Header metrics row ────────────────────────────────────
+    # Prior-year total for the active scope (full-year or same month last year)
+    if sel_month != 'All':
+        _mm = sel_month.split('-')[1] if '-' in sel_month else None
+        _py_sp = sum(PREV_YEAR['bu_month'][b][_mm]['spend']
+                     for b in PREV_YEAR['bu_month'] if _mm in PREV_YEAR['bu_month'][b]) if _mm else 0.0
+        _py_sv = sum(PREV_YEAR['bu_month'][b][_mm]['savings']
+                     for b in PREV_YEAR['bu_month'] if _mm in PREV_YEAR['bu_month'][b]) if _mm else 0.0
+        _py_lbl = f"FY26 {sel_month.split('-')[1]} (same mo.)"
+    else:
+        _py_sp = PREV_YEAR['fy_total']['spend']
+        _py_sv = PREV_YEAR['fy_total']['savings']
+        _py_lbl = "FY26 full year"
+    _py_pct = (_py_sv / _py_sp * 100) if _py_sp > 0 else 0.0
+
     st.markdown(f"""<div style="background:#13131a;border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:14px 20px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;">
 <div style="font-size:10px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:.1em;">FY'27 Actuals &nbsp;|&nbsp; All values Rs Crores</div>
 <div style="display:flex;gap:32px;">
   <div style="text-align:center;"><div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.08em;">Total Spend</div><div style="font-size:20px;font-weight:800;color:#fff;font-family:'DM Mono',monospace;">Rs {spend:.2f} Cr</div></div>
   <div style="text-align:center;"><div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.08em;">Total Savings</div><div style="font-size:20px;font-weight:800;color:#68d391;font-family:'DM Mono',monospace;">Rs {savings:.2f} Cr</div></div>
   <div style="text-align:center;"><div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.08em;">Savings Rate</div><div style="font-size:20px;font-weight:800;color:{'#68d391' if sav_pct>=4.5 else '#fc8181'};font-family:'DM Mono',monospace;">{sav_pct:.2f}%</div></div>
-  <div style="text-align:center;"><div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.08em;">vs Target 4.5%</div><div style="font-size:20px;font-weight:800;color:{'#68d391' if sav_pct>=4.5 else '#fc8181'};font-family:'DM Mono',monospace;">{sav_pct-4.5:+.2f}pp</div></div>
+  <div style="text-align:center;border-left:1px solid rgba(255,255,255,.08);padding-left:24px;"><div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.08em;">{_py_lbl}</div><div style="font-size:14px;font-weight:700;color:#888;font-family:'DM Mono',monospace;margin-top:3px;">Rs {_py_sp:.2f} Cr · {_py_pct:.1f}%</div></div>
   <div style="text-align:center;"><div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.08em;">POs Placed</div><div style="font-size:20px;font-weight:800;color:#fff;font-family:'DM Mono',monospace;">{n_pos}</div></div>
 </div></div>""", unsafe_allow_html=True)
 
@@ -630,6 +649,49 @@ with t2:
             bu_sv  = ssum(bu_df, C_SAV)    / 1e7
             bu_pct = (bu_sv / bu_sp * 100) if bu_sp > 0 else 0.0
             bu_n   = len(bu_df)
+
+            # ── Prior-year (FY25-26) comparison ──────────────────
+            # Map current BU name to prior-year key (ZAP 91 -> ZAP91).
+            _py_key = bu.replace(' ', '') if bu.replace(' ', '') in PREV_YEAR['bu_total'] else bu
+            py = None
+            if sel_month != 'All':
+                # Month-wise: compare same calendar month of prior year.
+                mm = sel_month.split('-')[1] if '-' in sel_month else None
+                if mm and _py_key in PREV_YEAR['bu_month'] and mm in PREV_YEAR['bu_month'][_py_key]:
+                    py = PREV_YEAR['bu_month'][_py_key][mm]
+            else:
+                py = PREV_YEAR['bu_total'].get(_py_key)
+
+            yoy_html = ''
+            if py:
+                py_sp, py_sv = py['spend'], py['savings']
+                py_pct = (py_sv / py_sp * 100) if py_sp > 0 else 0.0
+                def _arrow(cur, prev):
+                    if prev == 0: return '<span style="color:#63b3ed;">NEW</span>'
+                    d = cur - prev
+                    c = '#68d391' if d >= 0 else '#fc8181'
+                    sym = '▲' if d >= 0 else '▼'
+                    return f'<span style="color:{c};">{sym}</span>'
+                period_lbl = 'vs prior yr' if sel_month == 'All' else 'vs same mo. PY'
+                yoy_html = f'''<div style="border-top:1px solid rgba(255,255,255,.05);padding-top:9px;margin-top:9px;">
+<div style="font-size:8px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">YoY — {period_lbl} (FY26)</div>
+<table style="width:100%;border-collapse:collapse;">
+<tr><td style="font-size:10px;color:#999;padding:2px 0;">PO Value</td>
+<td style="font-size:10px;color:#888;font-family:'DM Mono',monospace;text-align:right;padding:2px 6px;">Rs {py_sp:.2f}</td>
+<td style="text-align:center;font-size:9px;">→</td>
+<td style="font-size:10px;color:#fff;font-family:'DM Mono',monospace;text-align:right;padding:2px 0;">Rs {bu_sp:.2f} {_arrow(bu_sp,py_sp)}</td></tr>
+<tr><td style="font-size:10px;color:#999;padding:2px 0;">Savings</td>
+<td style="font-size:10px;color:#888;font-family:'DM Mono',monospace;text-align:right;padding:2px 6px;">Rs {py_sv:.2f}</td>
+<td style="text-align:center;font-size:9px;">→</td>
+<td style="font-size:10px;color:#fff;font-family:'DM Mono',monospace;text-align:right;padding:2px 0;">Rs {bu_sv:.2f} {_arrow(bu_sv,py_sv)}</td></tr>
+<tr><td style="font-size:10px;color:#999;padding:2px 0;">Savings %</td>
+<td style="font-size:10px;color:#888;font-family:'DM Mono',monospace;text-align:right;padding:2px 6px;">{py_pct:.1f}%</td>
+<td style="text-align:center;font-size:9px;">→</td>
+<td style="font-size:10px;color:#fff;font-family:'DM Mono',monospace;text-align:right;padding:2px 0;">{bu_pct:.1f}% {_arrow(bu_pct,py_pct)}</td></tr>
+</table></div>'''
+            else:
+                yoy_html = '''<div style="border-top:1px solid rgba(255,255,255,.05);padding-top:9px;margin-top:9px;">
+<div style="font-size:9px;color:#63b3ed;font-weight:600;">● NEW vertical in FY27 — no prior-year data</div></div>'''
 
             # Status pill
             if bu_pct >= 4.5:
@@ -694,6 +756,7 @@ with t2:
 </div>
 <!-- Category table -->
 {f'<div style="border-top:1px solid rgba(255,255,255,.05);padding-top:10px;"><table style="width:100%;border-collapse:collapse;"><thead><tr><th style="font-size:8px;color:#555;text-transform:uppercase;letter-spacing:.06em;padding:0 0 5px 0;text-align:left;">Category</th><th style="font-size:8px;color:#555;text-transform:uppercase;letter-spacing:.06em;padding:0 0 5px 0;text-align:right;">Spend</th><th style="font-size:8px;color:#555;text-transform:uppercase;letter-spacing:.06em;padding:0 0 5px 0;text-align:right;">Savings%</th></tr></thead><tbody>{cat_html}</tbody></table></div>' if cat_html else ''}
+{yoy_html}
 <!-- PO count footer -->
 <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.04);font-size:9px;color:#555;">{bu_n} PO{'s' if bu_n!=1 else ''} placed</div>
 </div>""", unsafe_allow_html=True)
@@ -849,9 +912,11 @@ with t5:
         df_pos_stype = df_pos[stype_filled.ne('')].copy()
         n_stype_total = len(df_pos_stype)
 
-        avl_oem = int(df_pos_stype[C_STYPE].str.upper().str.contains('AVL OEM', na=False).sum())
-        avl_trd = int(df_pos_stype[C_STYPE].str.upper().str.contains('TRADER', na=False).sum())
-        nv_mask_filled = df_pos_stype[C_STYPE].astype(str).str.upper().str.contains('NV', na=False)
+        su_norm = df_pos_stype[C_STYPE].astype(str).str.upper()
+        # After _norm_stype values are AVL-OEM / AVL-TRADER / NV-OEM / NV-TRADER / Civil Contractor
+        avl_oem = int((su_norm.str.contains('AVL', na=False) & su_norm.str.contains('OEM', na=False)).sum())
+        avl_trd = int((su_norm.str.contains('AVL', na=False) & su_norm.str.contains('TRADER', na=False)).sum())
+        nv_mask_filled = su_norm.str.contains('NV', na=False)
         nv_n_filled    = int(nv_mask_filled.sum())
         nv_pct_filled  = nv_n_filled / n_stype_total * 100 if n_stype_total > 0 else 0.0
 
@@ -885,9 +950,14 @@ with t5:
             sv2.columns = ['Type', 'Count']
             sv2 = sv2[sv2['Type'].ne('')]
             if len(sv2):
+                _type_color = {
+                    'AVL-OEM': GRN, 'AVL-TRADER': BLU, 'NV-TRADER': RED,
+                    'NV-OEM': PUR, 'Civil Contractor': AMB,
+                }
+                pie_colors = [_type_color.get(t, '#888') for t in sv2['Type']]
                 fp2 = go.Figure(go.Pie(
                     labels=sv2['Type'], values=sv2['Count'], hole=0.4,
-                    marker_colors=[GRN, BLU, RED, PUR, AMB],
+                    marker_colors=pie_colors,
                     textfont=dict(color='white', size=11)
                 ))
                 fp2.update_layout(
