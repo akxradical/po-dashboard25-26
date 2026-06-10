@@ -512,9 +512,10 @@ else:
     df_ongoing   = df_pos.copy()
     n_completed, n_ongoing = 0, n_pos
 
-# OTIF — computed from ANY PO that has an actual OTIF value recorded
+# OTIF — average of the OTIF column values that are filled in.
 # (a delivery has happened and OTIF was measured), regardless of whether the
 # Delivery Status label still says "Ongoing" (partial deliveries count too).
+# Example: one row with OTIF 0.92 → shows 92.0%.
 otif_pct, otif_n = 0.0, 0
 if C_OTIF and C_OTIF in df_pos.columns and len(df_pos) > 0:
     ov = pd.to_numeric(df_pos[C_OTIF].astype(str).str.replace('%', ''), errors='coerce').dropna()
@@ -522,7 +523,7 @@ if C_OTIF and C_OTIF in df_pos.columns and len(df_pos) > 0:
     ov = ov[ov > 0]                                    # only rows with a real OTIF
     otif_n = len(ov)
     if otif_n > 0:
-        otif_pct = float((ov <= 1.05).sum() / otif_n * 100)
+        otif_pct = float(ov.mean() * 100)              # average of filled OTIF values
 
 # Subset of POs that have a real (positive) OTIF value — used for BU breakdown
 if C_OTIF and C_OTIF in df_pos.columns:
@@ -865,7 +866,7 @@ with t3:
             v=pd.to_numeric(s[C_OTIF].astype(str).str.replace('%',''),errors='coerce').dropna()
             if len(v)>0 and v.max()>2: v=v/100
             v=v[v>0]
-            if len(v): rows.append({'BU':bu,'OTIF%':float((v<=1.05).sum()/len(v)*100)})
+            if len(v): rows.append({'BU':bu,'OTIF%':float(v.mean()*100)})
         if rows:
             bo=pd.DataFrame(rows)
             fig5=go.Figure(go.Bar(x=bo['BU'],y=bo['OTIF%'],marker_color=[GRN if v>=75 else RED for v in bo['OTIF%']],marker_line_width=0,text=bo['OTIF%'].apply(lambda x:f'{x:.1f}%'),textposition='outside',textfont=dict(color='#ddd',size=11)))
