@@ -512,13 +512,24 @@ else:
     df_ongoing   = df_pos.copy()
     n_completed, n_ongoing = 0, n_pos
 
-# OTIF
+# OTIF — computed from ANY PO that has an actual OTIF value recorded
+# (a delivery has happened and OTIF was measured), regardless of whether the
+# Delivery Status label still says "Ongoing" (partial deliveries count too).
 otif_pct, otif_n = 0.0, 0
-if C_OTIF and C_OTIF in df_completed.columns and len(df_completed)>0:
-    ov = pd.to_numeric(df_completed[C_OTIF].astype(str).str.replace('%',''), errors='coerce').dropna()
-    if len(ov)>0 and ov.max()>2: ov = ov/100
-    ov = ov[ov>0]; otif_n = len(ov)
-    if otif_n>0: otif_pct = float((ov<=1.05).sum()/otif_n*100)
+if C_OTIF and C_OTIF in df_pos.columns and len(df_pos) > 0:
+    ov = pd.to_numeric(df_pos[C_OTIF].astype(str).str.replace('%', ''), errors='coerce').dropna()
+    if len(ov) > 0 and ov.max() > 2: ov = ov / 100   # handle 0-100 vs 0-1 scale
+    ov = ov[ov > 0]                                    # only rows with a real OTIF
+    otif_n = len(ov)
+    if otif_n > 0:
+        otif_pct = float((ov <= 1.05).sum() / otif_n * 100)
+
+# Subset of POs that have a real (positive) OTIF value — used for BU breakdown
+if C_OTIF and C_OTIF in df_pos.columns:
+    _otif_vals = pd.to_numeric(df_pos[C_OTIF].astype(str).str.replace('%', ''), errors='coerce')
+    df_otif = df_pos[_otif_vals.fillna(0) > 0].copy()
+else:
+    df_otif = pd.DataFrame(columns=df_pos.columns)
 
 # NVD — only count rows where supplier type is filled (not None/blank)
 nv_n, nv_pct = 0, 0.0
@@ -847,10 +858,10 @@ with t3:
                 fig_a.add_vline(x=90,line_dash='dash',line_color=RED,annotation_text='90d',annotation_font_color=RED)
                 apply_dk(fig_a,height=280,title_text='Unclosed PR Age (days)',showlegend=False)
                 st.plotly_chart(fig_a, width='stretch')
-    if n_completed>0 and C_OTIF and C_OTIF in df_completed.columns:
+    if len(df_otif)>0 and C_OTIF and C_OTIF in df_otif.columns:
         rows=[]
-        for bu in df_completed[C_BU].dropna().unique():
-            s=df_completed[df_completed[C_BU]==bu]
+        for bu in df_otif[C_BU].dropna().unique():
+            s=df_otif[df_otif[C_BU]==bu]
             v=pd.to_numeric(s[C_OTIF].astype(str).str.replace('%',''),errors='coerce').dropna()
             if len(v)>0 and v.max()>2: v=v/100
             v=v[v>0]
