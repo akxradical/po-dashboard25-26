@@ -100,12 +100,15 @@ GSHEET_TAB = os.getenv("GSHEET_TAB", "PO TRACKER  27")          # note: TWO spac
 MANAGER_EMAILS = [
     "ramsundar.a@zetwerk.in",
     "santhosh.r@zetwerk.com",
+    "ayush.kamle@zetwerk.in" 
 ]
+
 
 # Buyer name (exactly as in "Handled by" column)  →  email
 # Matching is case-insensitive, so "AYUSH" / "Ayush" both work.
 BUYER_EMAILS = {
     "AYUSH": "ayush.kamle@zetwerk.in",
+    
     # add more buyers here, e.g.  "Hari Kishore": "hari@zetwerk.in"
 }
 
@@ -263,91 +266,142 @@ def days_badge(days_left, status):
 def po_row_html(r):
     accent = STATUS_META[r["Status"]]["color"]
     return f"""
-    <tr>
-      <td style="padding:12px 16px;border-bottom:1px solid #eee;border-left:4px solid {accent};">
-        <div style="font-size:14px;font-weight:700;color:{INK};">{r['Item'] or '—'}</div>
-        <div style="font-size:12px;color:#888;margin-top:2px;">{r['BU']} &middot; {r['Project'] or '—'}</div>
-        <div style="font-size:11px;color:#aaa;margin-top:3px;">OD/PO: {r['PORef'] or '—'} &middot; {r['Supplier'] or '—'}</div>
+    <tr style="background:#fff;">
+      <td style="padding:14px 18px;border-bottom:1px solid #e8e8e8;border-left:4px solid {accent};width:40%;">
+        <div style="font-size:15px;font-weight:700;color:#1a1a1a;margin-bottom:4px;">{r['Item'] or '—'}</div>
+        <div style="font-size:12px;color:#444;font-weight:600;margin-bottom:3px;">{r['BU']} &nbsp;·&nbsp; {r['Project'] or '—'}</div>
+        <div style="font-size:12px;color:#333;margin-bottom:2px;"><span style="color:#666;font-weight:600;">OD/PO:</span> {r['PORef'] or '—'}</div>
+        <div style="font-size:12px;color:#333;"><span style="color:#666;font-weight:600;">Supplier:</span> {r['Supplier'] or '—'}</div>
       </td>
-      <td style="padding:12px 12px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap;">
-        <div style="font-size:13px;font-weight:700;color:{INK};">{fmt_value(r['POValue'])}</div>
-        <div style="font-size:11px;color:#aaa;margin-top:2px;">{r['Buyer'] or '—'}</div>
+      <td style="padding:14px 12px;border-bottom:1px solid #e8e8e8;text-align:center;vertical-align:middle;width:20%;">
+        <div style="font-size:15px;font-weight:800;color:#1a1a1a;">{fmt_value(r['POValue'])}</div>
+        <div style="font-size:11px;color:#555;margin-top:3px;font-weight:600;">{r['Buyer'] or '—'}</div>
       </td>
-      <td style="padding:12px 12px;border-bottom:1px solid #eee;text-align:center;white-space:nowrap;">
-        <div style="font-size:11px;color:#888;">MFC: {r['MFCDate']}</div>
-        <div style="font-size:11px;color:#888;margin-top:2px;">Due: {r['Expected']}</div>
+      <td style="padding:14px 12px;border-bottom:1px solid #e8e8e8;text-align:center;vertical-align:middle;width:20%;">
+        <div style="font-size:12px;color:#333;font-weight:600;margin-bottom:4px;">MFC: <span style="color:#1a1a1a;">{r['MFCDate']}</span></div>
+        <div style="font-size:12px;color:#333;font-weight:600;">Due: <span style="color:#1a1a1a;">{r['Expected']}</span></div>
       </td>
-      <td style="padding:12px 16px;border-bottom:1px solid #eee;text-align:right;">
+      <td style="padding:14px 16px;border-bottom:1px solid #e8e8e8;text-align:center;vertical-align:middle;width:20%;">
         {days_badge(r['DaysLeft'], r['Status'])}
       </td>
     </tr>"""
 
 
 def status_section(df_status, status):
-    """One status block (e.g. all OVERDUE rows), sorted most-urgent first."""
     if len(df_status) == 0:
         return ""
     meta = STATUS_META[status]
     body = df_status.sort_values("DaysLeft")
     rows = "".join(po_row_html(r) for _, r in body.iterrows())
+    # Section header with colored background band
     return f"""
-    <div style="padding:14px 24px 6px;">
-      <div style="font-size:13px;font-weight:800;color:{meta['color']};text-transform:uppercase;letter-spacing:.05em;">
-        {meta['icon']} {meta['label']} ({len(df_status)})
+    <div style="margin:0 0 0 0;">
+      <div style="background:{meta['color']}18;border-left:5px solid {meta['color']};padding:12px 20px;margin:16px 0 0 0;">
+        <span style="font-size:14px;font-weight:800;color:{meta['color']};text-transform:uppercase;letter-spacing:.06em;">
+          {meta['icon']} &nbsp;{meta['label']}
+        </span>
+        <span style="font-size:13px;font-weight:700;color:{meta['color']};margin-left:8px;">({len(df_status)} POs)</span>
       </div>
-    </div>
-    <table style="width:100%;border-collapse:collapse;margin-bottom:8px;">{rows}</table>"""
+      <table style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr style="background:#f7f7f7;">
+            <th style="padding:8px 18px;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:.06em;text-align:left;border-bottom:2px solid #e8e8e8;">Item / Project</th>
+            <th style="padding:8px 12px;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:.06em;text-align:center;border-bottom:2px solid #e8e8e8;">PO Value</th>
+            <th style="padding:8px 12px;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:.06em;text-align:center;border-bottom:2px solid #e8e8e8;">MFC / Due Date</th>
+            <th style="padding:8px 16px;font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:.06em;text-align:center;border-bottom:2px solid #e8e8e8;">Status</th>
+          </tr>
+        </thead>
+        <tbody>{rows}</tbody>
+      </table>
+    </div>"""
 
 
 def summary_strip(df_alerts):
     counts = {s: int((df_alerts["Status"] == s).sum()) for s in STATUS_ORDER}
+    val = df_alerts[df_alerts["Status"].isin(["OVERDUE", "RED"])]["POValue"].sum()
     cells = ""
     for s in STATUS_ORDER:
+        c = STATUS_META[s]["color"]
+        icon = STATUS_META[s]["icon"]
+        label = s.title()
         cells += f"""
-        <div style="flex:1;text-align:center;border-right:1px solid rgba(255,255,255,.08);">
-          <div style="font-size:26px;font-weight:800;color:{STATUS_META[s]['color']};font-family:monospace;">{counts[s]}</div>
-          <div style="font-size:9px;color:#888;text-transform:uppercase;letter-spacing:.07em;margin-top:2px;">{s.title()}</div>
-        </div>"""
-    val = df_alerts[df_alerts["Status"].isin(["OVERDUE", "RED"])]["POValue"].sum()
+        <td style="text-align:center;padding:18px 12px;border-right:1px solid rgba(255,255,255,.1);">
+          <div style="font-size:11px;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;">{icon} {label}</div>
+          <div style="font-size:36px;font-weight:900;color:{c};font-family:monospace;line-height:1;">{counts[s]}</div>
+        </td>"""
     cells += f"""
-        <div style="flex:1.3;text-align:center;">
-          <div style="font-size:22px;font-weight:800;color:#fff;font-family:monospace;">{fmt_value(val)}</div>
-          <div style="font-size:9px;color:#888;text-transform:uppercase;letter-spacing:.07em;margin-top:2px;">At Risk</div>
-        </div>"""
-    return f'<div style="display:flex;background:{CARD};padding:16px 24px;gap:10px;">{cells}</div>'
+        <td style="text-align:center;padding:18px 20px;">
+          <div style="font-size:11px;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;">💰 At Risk</div>
+          <div style="font-size:28px;font-weight:900;color:#fff;font-family:monospace;line-height:1;">{fmt_value(val)}</div>
+        </td>"""
+    return f"""
+    <table style="width:100%;border-collapse:collapse;background:{CARD};">
+      <tr>{cells}</tr>
+    </table>"""
 
 
 def shell(audience, today_str, greeting, body_html, df_alerts):
     return f"""
-<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f0f2f5;font-family:'Segoe UI',Arial,sans-serif;">
-<div style="max-width:700px;margin:0 auto;background:#fff;">
-  <div style="background:{DARK};padding:24px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;">
-      <div>
-        <div style="font-size:11px;font-weight:700;color:#fc4f4f;letter-spacing:.12em;text-transform:uppercase;">Zetwerk CPT &middot; CAT-2</div>
-        <div style="font-size:22px;font-weight:800;color:#fff;margin-top:4px;">MFC Delivery Report</div>
-      </div>
-      <div style="text-align:right;">
-        <div style="font-size:11px;color:#888;">{today_str}</div>
-        <div style="font-size:11px;color:#888;margin-top:2px;">{audience}</div>
-      </div>
-    </div>
+<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#f0f2f5;font-family:'Segoe UI',Helvetica,Arial,sans-serif;">
+<div style="max-width:700px;margin:0 auto;background:#ffffff;border-radius:0;box-shadow:0 2px 12px rgba(0,0,0,.08);">
+
+  <!-- HEADER -->
+  <div style="background:{DARK};padding:24px 28px;border-radius:0;">
+    <table style="width:100%;border-collapse:collapse;">
+      <tr>
+        <td>
+          <div style="font-size:11px;font-weight:700;color:#fc4f4f;letter-spacing:.14em;text-transform:uppercase;margin-bottom:6px;">Zetwerk CPT &middot; CAT-2 Procurement</div>
+          <div style="font-size:26px;font-weight:800;color:#ffffff;letter-spacing:-.01em;">MFC Delivery Report</div>
+        </td>
+        <td style="text-align:right;vertical-align:top;">
+          <div style="font-size:12px;color:#aaa;">{today_str}</div>
+          <div style="font-size:12px;color:#888;margin-top:4px;">{audience}</div>
+        </td>
+      </tr>
+    </table>
   </div>
+
+  <!-- SUMMARY STRIP -->
   {summary_strip(df_alerts)}
-  <div style="padding:20px 24px 4px;">
-    <div style="font-size:14px;color:{INK};line-height:1.6;">{greeting}</div>
+
+  <!-- GREETING -->
+  <div style="padding:20px 28px 8px;">
+    <div style="font-size:14px;color:#333;line-height:1.7;border-left:3px solid #e53e3e;padding-left:12px;">{greeting}</div>
   </div>
-  {body_html}
-  <div style="padding:8px 24px 26px;">
-    <a href="https://cat-2-dashboard.streamlit.app" style="display:inline-block;background:#e53e3e;color:#fff;text-decoration:none;padding:11px 22px;border-radius:8px;font-size:13px;font-weight:700;">Open Live Dashboard →</a>
+
+  <!-- DIVIDER -->
+  <div style="height:1px;background:#eeeeee;margin:8px 0;"></div>
+
+  <!-- BODY -->
+  <div style="padding:0 0 8px 0;">
+    {body_html}
   </div>
-  <div style="background:{DARK};padding:18px 24px;">
-    <div style="font-size:11px;color:#666;line-height:1.6;">
-      Automated from the CAT-2 Procurement Dashboard. Priority order: Overdue → Red → Amber → Green.<br>
-      Expected Delivery = MFC Date + Delivery Days. Generated {today_str}.
+
+  <!-- CTA BUTTON -->
+  <div style="padding:16px 28px 28px;">
+    <a href="https://cat-2-dashboard.streamlit.app"
+       style="display:inline-block;background:#e53e3e;color:#ffffff;text-decoration:none;
+              padding:13px 28px;border-radius:8px;font-size:14px;font-weight:700;
+              letter-spacing:.01em;">
+      Open Live Dashboard &rarr;
+    </a>
+  </div>
+
+  <!-- FOOTER -->
+  <div style="background:#f7f7f7;border-top:1px solid #e8e8e8;padding:16px 28px;">
+    <div style="font-size:11px;color:#888;line-height:1.7;">
+      Automated alert from the CAT-2 Procurement Dashboard &middot; Zetwerk CPT<br>
+      <strong style="color:#666;">Priority order:</strong> Overdue &rarr; Red &rarr; Amber &rarr; Green &nbsp;&middot;&nbsp;
+      <strong style="color:#666;">Expected Delivery</strong> = MFC Date + Delivery Days<br>
+      Generated {today_str}
     </div>
   </div>
-</div></body></html>"""
+
+</div>
+</body>
+</html>"""
 
 
 def build_buyer_email(buyer, df_own):
