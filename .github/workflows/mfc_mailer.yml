@@ -1,6 +1,8 @@
 name: CAT-2 MFC Mailer
 
 on:
+  schedule:
+    - cron: "30 2 * * 1"
   workflow_dispatch:
     inputs:
       mode:
@@ -12,8 +14,6 @@ on:
           - dry-run
           - test
           - live
-  repository_dispatch:
-    types: [weekly-mfc-mail]
 
 jobs:
   send-mfc-alerts:
