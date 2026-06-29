@@ -100,16 +100,18 @@ GSHEET_TAB = os.getenv("GSHEET_TAB", "PO TRACKER  27")          # note: TWO spac
 MANAGER_EMAILS = [
     "ramsundar.a@zetwerk.in",
     "santhosh.r@zetwerk.com",
-    "ayush.kamle@zetwerk.in" 
+    "sarath.r@zetwerk.com",
+    "dwaipayan.g@zetwerk.com",
+    "ayush.kamle@zetwerk.in",
 ]
-
 
 # Buyer name (exactly as in "Handled by" column)  →  email
 # Matching is case-insensitive, so "AYUSH" / "Ayush" both work.
 BUYER_EMAILS = {
-    "AYUSH": "ayush.kamle@zetwerk.in",
-    
-    # add more buyers here, e.g.  "Hari Kishore": "hari@zetwerk.in"
+    "AYUSH":        "ayush.kamle@zetwerk.in",
+    "HARI KISHORE": "hari.kishore@zetwerk.com",
+    "PANKAJ TIWARI":"pankaj.tiwari@zetwerk.com",
+    "FARHAN":       "farhan.s@zetwerk.com",
 }
 
 SEND_BUYER_MAILS = True
@@ -472,21 +474,30 @@ def build_manager_email(df_all):
 # ════════════════════════════════════════════════════════════════════════
 #  SEND
 # ════════════════════════════════════════════════════════════════════════
-def send_email(to_emails, subject, html, dry_run=False):
+def send_email(to_emails, subject, html, dry_run=False, bcc=False):
     if isinstance(to_emails, str):
         to_emails = [to_emails]
     if dry_run:
-        print(f"  [DRY-RUN] To: {', '.join(to_emails)}  |  {subject}")
+        kind = "BCC" if bcc else "To"
+        print(f"  [DRY-RUN] {kind}: {', '.join(to_emails)}  |  {subject}")
         return
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"]    = f"{SENDER_NAME} <{GMAIL_USER}>"
-    msg["To"]      = ", ".join(to_emails)
+    if bcc:
+        # Recipients are hidden from each other — each manager sees only their
+        # own name. The visible "To" header just shows the sender.
+        msg["To"] = f"{SENDER_NAME} <{GMAIL_USER}>"
+    else:
+        msg["To"] = ", ".join(to_emails)
     msg.attach(MIMEText(html, "html"))
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
         s.login(GMAIL_USER, GMAIL_APP_PASS)
+        # The actual delivery list (sendmail's rcpt) is what truly gets the mail;
+        # with bcc=True these addresses simply never appear in any visible header.
         s.sendmail(GMAIL_USER, to_emails, msg.as_string())
-    print(f"  ✓ Sent to {', '.join(to_emails)}  |  {subject}")
+    label = "BCC" if bcc else "To"
+    print(f"  ✓ Sent ({label}) to {', '.join(to_emails)}  |  {subject}")
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -517,7 +528,7 @@ def main():
     print("Managers:")
     if MANAGER_EMAILS:
         subj, html = build_manager_email(alerts)
-        send_email(MANAGER_EMAILS, subj, html, dry_run=dry_run)
+        send_email(MANAGER_EMAILS, subj, html, dry_run=dry_run, bcc=True)
 
     if SEND_BUYER_MAILS:
         print("Buyers:")
