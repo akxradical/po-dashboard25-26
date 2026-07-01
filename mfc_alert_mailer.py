@@ -109,9 +109,9 @@ MANAGER_EMAILS = [
 # Matching is case-insensitive, so "AYUSH" / "Ayush" both work.
 BUYER_EMAILS = {
     "AYUSH":        "ayush.kamle@zetwerk.in",
-    "HARI KISHORE": "hari.kishore@zetwerk.com",
-    "PANKAJ TIWARI":"pankaj.tiwari@zetwerk.com",
-    "FARHAN":       "farhan.s@zetwerk.com",
+    "Hari Kishore": "hari.kishore@zetwerk.com",
+    "Pankaj Tiwari":"pankaj.tiwari@zetwerk.com",
+    "Farhan":       "farhan.s@zetwerk.com",
 }
 
 SEND_BUYER_MAILS = True
