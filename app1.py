@@ -1175,8 +1175,8 @@ with t9:
                 marker_line_width=0,
                 text=[f'Rs {s/1e7:.1f}Cr ({p:.0f}%)' for s, p in zip(top['spend'][::-1], top['pct'][::-1])],
                 textposition='outside', textfont=dict(color='#ddd', size=10)))
-            apply_dk(fig_v, height=400, title_text='Top Vendors by Spend', showlegend=False,
-                     xaxis_range=[0, float(top['spend'].max() / 1e7) * 1.28])
+            apply_dk(fig_v, height=400, title_text='Top Vendors by Spend', showlegend=False)
+            fig_v.update_xaxes(range=[0, float(top['spend'].max() / 1e7) * 1.28])
             st.plotly_chart(fig_v, width='stretch')
         with c2:
             vc_sorted = vc.sort_values('spend', ascending=False).reset_index(drop=True)
@@ -1188,17 +1188,21 @@ with t9:
                 fillcolor='rgba(229,62,62,.08)'))
             fig_p.add_hline(y=80, line_dash='dash', line_color=AMB,
                             annotation_text='80% of spend', annotation_font_color=AMB)
-            apply_dk(fig_p, height=400, title_text='Cumulative Spend (Pareto)', showlegend=False,
-                     xaxis_title='Vendors (ranked)', yaxis_title='% of total spend')
+            apply_dk(fig_p, height=400, title_text='Cumulative Spend (Pareto)', showlegend=False)
+            fig_p.update_xaxes(title_text='Vendors (ranked)')
+            fig_p.update_yaxes(title_text='% of total spend')
             st.plotly_chart(fig_p, width='stretch')
 
         # DRILL-DOWN
         st.markdown("#### Drill down — select a vendor to see their POs")
-        vlist = vc[C_SUPPLIER].tolist()
-        sel_v = st.selectbox(
-            "Vendor", vlist, label_visibility="collapsed",
-            format_func=lambda v: f"{str(v)[:40]}  —  Rs {vc[vc[C_SUPPLIER]==v]['spend'].iloc[0]/1e7:.2f}Cr  ({int(vc[vc[C_SUPPLIER]==v]['pos'].iloc[0])} POs)")
-        if sel_v:
+        # Precompute display labels once (avoids per-render lookups that can crash)
+        vc_lbl = vc.copy()
+        vc_lbl['_label'] = vc_lbl.apply(
+            lambda r: f"{str(r[C_SUPPLIER])[:40]}  —  Rs {r['spend']/1e7:.2f}Cr  ({int(r['pos'])} POs)", axis=1)
+        label_to_vendor = dict(zip(vc_lbl['_label'], vc_lbl[C_SUPPLIER]))
+        sel_label = st.selectbox("Vendor", vc_lbl['_label'].tolist(), label_visibility="collapsed", key="vendor_drill")
+        sel_v = label_to_vendor.get(sel_label)
+        if sel_v is not None:
             vg = vdf[vdf[C_SUPPLIER] == sel_v]
             sp = vg['_sp'].sum() / 1e7
             sv = vg['_sv'].sum() / 1e7
@@ -1214,8 +1218,12 @@ with t9:
 
             show_v = [c for c in ['SN', C_BU, 'Project Name', C_ITEMS, C_CAT, C_HANDLER, 'PO/OD Ref.', C_PO_VAL, C_SAV, C_SAV_PCT, C_CUR_ST] if c and c in vg.columns]
             vgd = vg[show_v].copy()
+            # Force every column to a clean string so Streamlit/Arrow never crashes on mixed types
             for c in vgd.columns:
-                if pd.api.types.is_datetime64_any_dtype(vgd[c]): vgd[c] = vgd[c].dt.strftime('%d-%b-%Y')
+                if pd.api.types.is_datetime64_any_dtype(vgd[c]):
+                    vgd[c] = vgd[c].dt.strftime('%d-%b-%Y')
+                else:
+                    vgd[c] = vgd[c].astype(str).replace({'nan': '', 'None': '', 'NaT': ''})
             st.dataframe(vgd, width='stretch', height=min(40 * len(vgd) + 50, 420))
 
         neg = vdf[vdf['_sv'] < 0]
@@ -1253,6 +1261,16 @@ with t10:
             + '<div style="font-size:11px;font-weight:700;color:' + color
             + ';text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;">' + title + '</div>'
             + body_html + '</div>', unsafe_allow_html=True)
+
+    def safe_table(dfx, maxh=320):
+        """Render any dataframe as clean strings so Arrow never crashes on mixed types."""
+        d = dfx.copy()
+        for c in d.columns:
+            if pd.api.types.is_datetime64_any_dtype(d[c]):
+                d[c] = d[c].dt.strftime('%d-%b-%Y')
+            else:
+                d[c] = d[c].astype(str).replace({'nan': '', 'None': '', 'NaT': ''})
+        st.dataframe(d, width='stretch', height=min(40 * len(d) + 50, maxh))
 
     def big_metrics(pairs):
         cells = ''.join(
@@ -1311,7 +1329,7 @@ with t10:
                 bubble("Overdue Deliveries", big_metrics([('Overdue POs', str(len(od)), '#fc8181'), ('Value at Risk', f'Rs {val:.2f}Cr', '#fc8181'), ('Worst delay', worst, '#fc8181')]), '#e53e3e')
                 if len(od):
                     sc = [c for c in [C_BU, 'Project Name', C_ITEMS, C_SUPPLIER, C_HANDLER, C_PO_VAL] if c and c in od.columns]
-                    st.dataframe(od.sort_values('_left')[sc], width='stretch', height=min(40 * len(od) + 50, 320))
+                    safe_table(od.sort_values('_left')[sc], 320)
             else:
                 bubble("Overdue", "MFC delivery data not available yet.", '#e53e3e')
 
@@ -1322,7 +1340,7 @@ with t10:
             bubble("Negative Savings (paid above baseline)", big_metrics([('POs', str(len(neg)), '#fc8181'), ('Over baseline', f'Rs {val:.2f}Cr', '#fc8181')]), '#e53e3e')
             if len(neg):
                 sc = [c for c in [C_BU, 'Project Name', C_ITEMS, C_SUPPLIER, C_HANDLER, C_PO_VAL, C_SAV] if c and c in neg.columns]
-                st.dataframe(neg[sc], width='stretch', height=min(40 * len(neg) + 50, 300))
+                safe_table(neg[sc], 300)
 
         elif any(k in ql for k in ['how many po', 'total po', 'number of po', 'count']):
             answered = True
@@ -1348,10 +1366,7 @@ with t10:
                                    big_metrics([('POs', str(len(g)), '#63b3ed'), ('Spend', f'Rs {sp:.2f}Cr', '#fff'), ('Savings', f'Rs {sv:.2f}Cr', '#68d391'), ('Rate', f'{pct:.1f}%', '#68d391' if pct >= 4.5 else '#f6e05e')]) + extra, clr)
                             other = C_CAT if col == C_SUPPLIER else C_SUPPLIER
                             sc = [c for c in [C_BU, 'Project Name', C_ITEMS, other, C_HANDLER, 'PO/OD Ref.', C_PO_VAL, C_CUR_ST] if c and c in g.columns]
-                            gd = g[sc].copy()
-                            for c in gd.columns:
-                                if pd.api.types.is_datetime64_any_dtype(gd[c]): gd[c] = gd[c].dt.strftime('%d-%b-%Y')
-                            st.dataframe(gd, width='stretch', height=min(40 * len(gd) + 50, 300))
+                            safe_table(g[sc], 300)
                         break
 
         if not answered:
