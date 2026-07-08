@@ -567,7 +567,7 @@ def kc(val,lbl,sub='',delta='',dc='',cc='cB'):
 def apply_dk(fig, **kw):
     fig.update_layout(**DK, **kw); return fig
 
-t1,t2,t3,t4,t5,t6,t7,t8,t9,t10 = st.tabs(["Overview","Spend & Savings","TAT & OTIF","Working Capital","New Vendor Dev","MFC Tracker","Ongoing POs","PR-PO Unclosed","Vendor Risk","Ask Data"])
+t1,t2,t3,t4,t5,t6,t7,t8,t9,t10 = st.tabs(["Overview","Spend & Savings","TAT & OTIF","Working Capital","New Vendor Dev","MFC Tracker","Ongoing POs","PR-PO Unclosed","Vendor Concentration","Ask Data"])
 
 # ════ TAB 1 — OVERVIEW ═══════════════════════════════════════
 with t1:
@@ -1129,14 +1129,14 @@ with t8:
         st.markdown(f"**{len(ds2)} unclosed PRs**")
         st.dataframe(ds2.style.apply(hl_pr,axis=1),width='stretch',height=min(40*len(ds2)+50,700))
 
-# ════ TAB 9 — VENDOR RISK ═══════════════════════════════════
+# ════ TAB 9 — VENDOR CONCENTRATION ══════════════════════════
 with t9:
     st.markdown("### Vendor Concentration & Spend Risk")
     if C_SUPPLIER and C_SUPPLIER in df_pos.columns and C_PO_VAL and len(df_pos) > 0:
         vdf = df_pos.copy()
         vdf['_sp'] = pd.to_numeric(vdf[C_PO_VAL], errors='coerce').fillna(0)
         vdf['_sv'] = pd.to_numeric(vdf[C_SAV], errors='coerce').fillna(0) if C_SAV else 0
-        vdf = vdf[vdf[C_SUPPLIER].astype(str).str.strip().replace({'nan':'','None':''}).ne('')]
+        vdf = vdf[vdf[C_SUPPLIER].astype(str).str.strip().replace({'nan': '', 'None': ''}).ne('')]
 
         vc = vdf.groupby(C_SUPPLIER).agg(
             spend=('_sp', 'sum'), savings=('_sv', 'sum'), pos=('_sp', 'count')
@@ -1144,188 +1144,218 @@ with t9:
         total_sp = vc['spend'].sum()
         vc['pct'] = vc['spend'] / total_sp * 100 if total_sp > 0 else 0
 
-        top5_pct  = vc.head(5)['pct'].sum()
+        top5_pct = vc.head(5)['pct'].sum()
         top10_pct = vc.head(10)['pct'].sum()
         n_vendors = len(vc)
-        # HHI (Herfindahl index) — concentration measure
         hhi = ((vc['pct']) ** 2).sum()
         conc_label = 'HIGH' if top5_pct >= 70 else ('MODERATE' if top5_pct >= 50 else 'LOW')
         conc_color = '#e53e3e' if top5_pct >= 70 else ('#d69e2e' if top5_pct >= 50 else '#38a169')
 
-        c1,c2,c3,c4 = st.columns(4)
+        c1, c2, c3, c4 = st.columns(4)
         with c1: st.metric("Total Vendors", str(n_vendors))
-        with c2: st.metric("Top 5 = Spend Share", f"{top5_pct:.1f}%", conc_label)
-        with c3: st.metric("Top 10 = Spend Share", f"{top10_pct:.1f}%")
-        with c4: st.metric("Concentration", conc_label,
-                           f"HHI {hhi:.0f}" + (" (risky)" if hhi>2500 else ""))
+        with c2: st.metric("Top 5 Spend Share", f"{top5_pct:.1f}%", conc_label)
+        with c3: st.metric("Top 10 Spend Share", f"{top10_pct:.1f}%")
+        with c4: st.metric("Concentration (HHI)", f"{hhi:.0f}", "Concentrated" if hhi > 2500 else "Diversified")
 
-        st.markdown(f"""<div class="info-box" style="border-left-color:{conc_color};margin:8px 0 14px;">
-<b style="color:{conc_color};">{conc_label} concentration.</b> Your top 5 vendors account for {top5_pct:.1f}% of total spend
-(Rs {vc.head(5)['spend'].sum()/1e7:.1f} Cr of Rs {total_sp/1e7:.1f} Cr). High dependence on few vendors
-increases supply risk — a delay or price hike from a top vendor has outsized impact.</div>""",
-                    unsafe_allow_html=True)
+        st.markdown(
+            '<div class="info-box" style="border-left-color:' + conc_color + ';margin:8px 0 14px;">'
+            + '<b style="color:' + conc_color + ';">' + conc_label + ' concentration.</b> '
+            + 'Top 5 vendors carry ' + f'{top5_pct:.1f}' + '% of total spend (Rs '
+            + f'{vc.head(5)["spend"].sum()/1e7:.1f}' + ' Cr of Rs ' + f'{total_sp/1e7:.1f}'
+            + ' Cr). A delay or price move from any top vendor has outsized impact.</div>',
+            unsafe_allow_html=True)
 
-        c1,c2 = st.columns([1.3,1])
+        c1, c2 = st.columns([1.3, 1])
         with c1:
             top = vc.head(12).copy()
-            top['label'] = top[C_SUPPLIER].astype(str).str[:28]
+            top['label'] = top[C_SUPPLIER].astype(str).str[:26]
             fig_v = go.Figure(go.Bar(
-                y=top['label'][::-1], x=top['spend'][::-1]/1e7, orientation='h',
-                marker_color=[('#e53e3e' if p>=15 else ('#d69e2e' if p>=5 else BLU)) for p in top['pct'][::-1]],
+                y=top['label'][::-1], x=top['spend'][::-1] / 1e7, orientation='h',
+                marker_color=[('#e53e3e' if p >= 15 else ('#d69e2e' if p >= 5 else BLU)) for p in top['pct'][::-1]],
                 marker_line_width=0,
-                text=[f'Rs {s/1e7:.1f}Cr ({p:.0f}%)' for s,p in zip(top['spend'][::-1], top['pct'][::-1])],
-                textposition='outside', textfont=dict(color='#ddd', size=10)
-            ))
+                text=[f'Rs {s/1e7:.1f}Cr ({p:.0f}%)' for s, p in zip(top['spend'][::-1], top['pct'][::-1])],
+                textposition='outside', textfont=dict(color='#ddd', size=10)))
             apply_dk(fig_v, height=400, title_text='Top Vendors by Spend', showlegend=False,
-                     xaxis_range=[0, float(top['spend'].max()/1e7)*1.25])
+                     xaxis_range=[0, float(top['spend'].max() / 1e7) * 1.28])
             st.plotly_chart(fig_v, width='stretch')
         with c2:
-            # Pareto: cumulative share
             vc_sorted = vc.sort_values('spend', ascending=False).reset_index(drop=True)
             vc_sorted['cum_pct'] = vc_sorted['pct'].cumsum()
             fig_p = go.Figure()
             fig_p.add_trace(go.Scatter(
-                x=list(range(1, len(vc_sorted)+1)), y=vc_sorted['cum_pct'],
+                x=list(range(1, len(vc_sorted) + 1)), y=vc_sorted['cum_pct'],
                 mode='lines', line=dict(color=RED, width=2.5), fill='tozeroy',
-                fillcolor='rgba(229,62,62,.08)'
-            ))
+                fillcolor='rgba(229,62,62,.08)'))
             fig_p.add_hline(y=80, line_dash='dash', line_color=AMB,
                             annotation_text='80% of spend', annotation_font_color=AMB)
-            apply_dk(fig_p, height=400, title_text='Cumulative Spend (Pareto)',
-                     showlegend=False,
-                     xaxis_title='Number of vendors', yaxis_title='% of total spend')
+            apply_dk(fig_p, height=400, title_text='Cumulative Spend (Pareto)', showlegend=False,
+                     xaxis_title='Vendors (ranked)', yaxis_title='% of total spend')
             st.plotly_chart(fig_p, width='stretch')
 
-        # Negative savings flag
+        # DRILL-DOWN
+        st.markdown("#### Drill down — select a vendor to see their POs")
+        vlist = vc[C_SUPPLIER].tolist()
+        sel_v = st.selectbox(
+            "Vendor", vlist, label_visibility="collapsed",
+            format_func=lambda v: f"{str(v)[:40]}  —  Rs {vc[vc[C_SUPPLIER]==v]['spend'].iloc[0]/1e7:.2f}Cr  ({int(vc[vc[C_SUPPLIER]==v]['pos'].iloc[0])} POs)")
+        if sel_v:
+            vg = vdf[vdf[C_SUPPLIER] == sel_v]
+            sp = vg['_sp'].sum() / 1e7
+            sv = vg['_sv'].sum() / 1e7
+            share = vg['_sp'].sum() / total_sp * 100 if total_sp > 0 else 0
+            nproj = vg['Project Name'].nunique() if 'Project Name' in vg.columns else 0
+            nbu = vg[C_BU].nunique() if C_BU in vg.columns else 0
+            m1, m2, m3, m4, m5 = st.columns(5)
+            with m1: st.metric("POs", str(len(vg)))
+            with m2: st.metric("Total Spend", f"Rs {sp:.2f}Cr")
+            with m3: st.metric("Savings", f"Rs {sv:.2f}Cr")
+            with m4: st.metric("% of Cat-2 Spend", f"{share:.1f}%")
+            with m5: st.metric("Projects / BUs", f"{nproj} / {nbu}")
+
+            show_v = [c for c in ['SN', C_BU, 'Project Name', C_ITEMS, C_CAT, C_HANDLER, 'PO/OD Ref.', C_PO_VAL, C_SAV, C_SAV_PCT, C_CUR_ST] if c and c in vg.columns]
+            vgd = vg[show_v].copy()
+            for c in vgd.columns:
+                if pd.api.types.is_datetime64_any_dtype(vgd[c]): vgd[c] = vgd[c].dt.strftime('%d-%b-%Y')
+            st.dataframe(vgd, width='stretch', height=min(40 * len(vgd) + 50, 420))
+
         neg = vdf[vdf['_sv'] < 0]
         if len(neg) > 0:
             neg_val = abs(neg['_sv'].sum()) / 1e7
-            st.markdown(f"""<div class="info-box" style="border-left-color:#e53e3e;margin-top:8px;">
-<b style="color:#fc8181;">⚠ Savings leakage:</b> {len(neg)} PO(s) were placed <b>above</b> baseline price,
-totalling Rs {neg_val:.2f} Cr paid over benchmark. Review these for negotiation gaps.</div>""",
-                        unsafe_allow_html=True)
-            show_neg = [c for c in ['SN',C_BU,C_ITEMS,C_SUPPLIER,C_HANDLER,C_PO_VAL,C_SAV,C_SAV_PCT] if c and c in neg.columns]
-            nd = neg[show_neg].copy()
-            for c in nd.columns:
-                if pd.api.types.is_datetime64_any_dtype(nd[c]): nd[c]=nd[c].dt.strftime('%d-%b-%Y')
-            st.dataframe(nd, width='stretch', height=min(40*len(nd)+50, 300))
+            st.markdown(
+                '<div class="info-box" style="border-left-color:#e53e3e;margin-top:12px;">'
+                + '<b style="color:#fc8181;">Savings leakage:</b> ' + str(len(neg))
+                + ' PO(s) placed <b>above</b> baseline, totalling Rs ' + f'{neg_val:.2f}'
+                + ' Cr over benchmark.</div>', unsafe_allow_html=True)
     else:
         st.markdown('<div class="info-box">Vendor data will populate once POs with supplier names are placed.</div>', unsafe_allow_html=True)
 
-# ════ TAB 10 — ASK DATA (keyword search, no LLM) ════════════
+# ════ TAB 10 — ASK DATA (conversational, no LLM) ════════════
 with t10:
     st.markdown("### Ask the Data")
-    st.markdown('<div class="info-box">Type a BU, buyer, vendor, or category name to get instant numbers — no AI, just your live data. Examples: <b>Water</b>, <b>Hari Kishore</b>, <b>overdue</b>, <b>Welspun</b>, <b>negative savings</b>.</div>', unsafe_allow_html=True)
+    st.markdown('<div style="font-size:13px;color:#888;margin-bottom:14px;">Ask about any BU, buyer, vendor, or category — or try a question. No AI, just instant answers computed live from your data.</div>', unsafe_allow_html=True)
 
-    q = st.text_input("Search", placeholder="e.g. Water  /  overdue  /  Hari Kishore  /  Welspun", label_visibility="collapsed", key="ask_q")
+    chip_html = (
+        '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;">'
+        '<span style="background:rgba(108,99,255,.12);border:1px solid rgba(108,99,255,.25);color:#a78bfa;padding:5px 12px;border-radius:16px;font-size:12px;">Try: top vendors</span>'
+        '<span style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.25);color:#68d391;padding:5px 12px;border-radius:16px;font-size:12px;">who saved the most</span>'
+        '<span style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25);color:#fc8181;padding:5px 12px;border-radius:16px;font-size:12px;">overdue</span>'
+        '<span style="background:rgba(234,179,8,.1);border:1px solid rgba(234,179,8,.25);color:#f6e05e;padding:5px 12px;border-radius:16px;font-size:12px;">Water</span>'
+        '<span style="background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.25);color:#63b3ed;padding:5px 12px;border-radius:16px;font-size:12px;">negative savings</span>'
+        '</div>')
+    st.markdown(chip_html, unsafe_allow_html=True)
+
+    q = st.text_input("Search", placeholder="Ask anything — e.g. 'how much did we spend on Water', 'top vendors', 'who has most overdue'", label_visibility="collapsed", key="ask_q")
+
+    def bubble(title, body_html, color='#6c63ff'):
+        st.markdown(
+            '<div style="background:#13131a;border:1px solid rgba(255,255,255,.08);border-left:3px solid '
+            + color + ';border-radius:14px;padding:18px 22px;margin-top:12px;">'
+            + '<div style="font-size:11px;font-weight:700;color:' + color
+            + ';text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;">' + title + '</div>'
+            + body_html + '</div>', unsafe_allow_html=True)
+
+    def big_metrics(pairs):
+        cells = ''.join(
+            '<div style="flex:1;min-width:90px;"><div style="font-size:10px;color:#666;text-transform:uppercase;letter-spacing:.06em;">'
+            + l + '</div><div style="font-size:22px;font-weight:800;color:' + c
+            + ';font-family:DM Mono,monospace;line-height:1.3;">' + v + '</div></div>'
+            for l, v, c in pairs)
+        return '<div style="display:flex;gap:24px;flex-wrap:wrap;">' + cells + '</div>'
+
+    def row_line(left, right, lcolor='#ddd', rcolor='#fff'):
+        return ('<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.05);">'
+                + '<span style="color:' + lcolor + ';font-size:13px;">' + left + '</span>'
+                + '<span style="color:' + rcolor + ';font-family:DM Mono,monospace;font-size:13px;">' + right + '</span></div>')
 
     if q and q.strip():
         ql = q.strip().lower()
         adf = df_pos.copy()
         adf['_sp'] = pd.to_numeric(adf[C_PO_VAL], errors='coerce').fillna(0) if C_PO_VAL else 0
         adf['_sv'] = pd.to_numeric(adf[C_SAV], errors='coerce').fillna(0) if C_SAV else 0
+        total_sp = adf['_sp'].sum()
+        answered = False
 
-        def result_card(title, rows_html):
-            st.markdown(f'<div style="background:#13131a;border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:16px 20px;margin-top:10px;"><div style="font-size:14px;font-weight:700;color:#fff;margin-bottom:12px;">{title}</div>{rows_html}</div>', unsafe_allow_html=True)
+        if any(k in ql for k in ['top vendor', 'biggest vendor', 'largest vendor', 'which vendor', 'vendor']):
+            if C_SUPPLIER:
+                answered = True
+                vg = adf[adf[C_SUPPLIER].astype(str).str.strip().ne('')].groupby(C_SUPPLIER)['_sp'].agg(['sum', 'count']).sort_values('sum', ascending=False).head(5)
+                rows = ''
+                for i, (name, r) in enumerate(vg.iterrows(), 1):
+                    share = r['sum'] / total_sp * 100
+                    rows += row_line(f'{i}. {str(name)[:38]}', f'Rs {r["sum"]/1e7:.2f}Cr · {share:.0f}% · {int(r["count"])} POs')
+                top5share = vg['sum'].sum() / total_sp * 100
+                bubble("Top 5 Vendors by Spend", rows + '<div style="margin-top:10px;font-size:12px;color:#888;">These 5 vendors account for <b style="color:#fc8181;">' + f'{top5share:.0f}' + '%</b> of total Cat-2 spend.</div>', '#6c63ff')
 
-        def metric_row(pairs):
-            cells = ''.join(f'<div style="flex:1;"><div style="font-size:10px;color:#666;text-transform:uppercase;letter-spacing:.06em;">{l}</div><div style="font-size:20px;font-weight:800;color:{c};font-family:DM Mono,monospace;">{v}</div></div>' for l,v,c in pairs)
-            return f'<div style="display:flex;gap:20px;">{cells}</div>'
+        elif any(k in ql for k in ['saved the most', 'most saving', 'best saving', 'highest saving', 'who saved', 'top saving']):
+            answered = True
+            grp_col = C_HANDLER if any(k in ql for k in ['buyer', 'who']) else C_BU
+            gg = adf.groupby(grp_col)['_sv'].sum().sort_values(ascending=False).head(5)
+            rows = ''
+            for i, (name, val) in enumerate(gg.items(), 1):
+                rows += row_line(f'{i}. {name}', f'Rs {val/1e7:.2f}Cr', rcolor='#68d391')
+            bubble(f"Top Savings by {'Buyer' if grp_col==C_HANDLER else 'BU'}", rows, '#22c55e')
 
-        matched = False
-
-        # 1. Special keywords
-        if 'overdue' in ql or 'late' in ql:
-            matched = True
+        elif any(k in ql for k in ['overdue', 'late deliver', 'delayed']):
+            answered = True
             if C_MFC_DT and C_MFC_DAYS:
-                today = pd.Timestamp(date.today())
-                m = df_pos.copy()
+                m = adf.copy()
                 m['_mfc'] = pd.to_datetime(m[C_MFC_DT], errors='coerce')
-                m['_days'] = pd.to_numeric(m[C_MFC_DAYS].astype(str).str.replace(',',''), errors='coerce')
-                m = m.dropna(subset=['_mfc','_days'])
-                m = m[m['_days']>0]
+                m['_days'] = pd.to_numeric(m[C_MFC_DAYS].astype(str).str.replace(',', ''), errors='coerce')
+                m = m.dropna(subset=['_mfc', '_days'])
+                m = m[m['_days'] > 0]
                 m['_exp'] = m['_mfc'] + pd.to_timedelta(m['_days'].astype(int), unit='D')
-                m['_left'] = (m['_exp']-today).dt.days
-                od = m[m['_left']<=0]
-                val = pd.to_numeric(od[C_PO_VAL], errors='coerce').fillna(0).sum()/1e7
-                result_card(f"Overdue Deliveries",
-                    metric_row([('Overdue POs', str(len(od)), '#fc8181'),
-                                ('Value at Risk', f'Rs {val:.2f}Cr', '#fc8181')]))
+                m['_left'] = (m['_exp'] - pd.Timestamp(date.today())).dt.days
+                od = m[m['_left'] <= 0]
+                val = od['_sp'].sum() / 1e7
+                worst = f'{int(abs(od["_left"].min()))}d' if len(od) else '—'
+                bubble("Overdue Deliveries", big_metrics([('Overdue POs', str(len(od)), '#fc8181'), ('Value at Risk', f'Rs {val:.2f}Cr', '#fc8181'), ('Worst delay', worst, '#fc8181')]), '#e53e3e')
                 if len(od):
-                    sc=[c for c in [C_BU,C_ITEMS,C_SUPPLIER,C_HANDLER,C_PO_VAL] if c and c in od.columns]
-                    st.dataframe(od[sc], width='stretch', height=min(40*len(od)+50,300))
+                    sc = [c for c in [C_BU, 'Project Name', C_ITEMS, C_SUPPLIER, C_HANDLER, C_PO_VAL] if c and c in od.columns]
+                    st.dataframe(od.sort_values('_left')[sc], width='stretch', height=min(40 * len(od) + 50, 320))
             else:
-                st.info("MFC data not available.")
+                bubble("Overdue", "MFC delivery data not available yet.", '#e53e3e')
 
-        elif 'negative' in ql or 'leakage' in ql or 'above baseline' in ql or 'loss' in ql:
-            matched = True
-            neg = adf[adf['_sv']<0]
-            val = abs(neg['_sv'].sum())/1e7
-            result_card("Negative Savings (paid above baseline)",
-                metric_row([('POs', str(len(neg)), '#fc8181'),
-                            ('Over baseline', f'Rs {val:.2f}Cr', '#fc8181')]))
+        elif any(k in ql for k in ['negative saving', 'leakage', 'above baseline', 'over baseline', 'loss']):
+            answered = True
+            neg = adf[adf['_sv'] < 0]
+            val = abs(neg['_sv'].sum()) / 1e7
+            bubble("Negative Savings (paid above baseline)", big_metrics([('POs', str(len(neg)), '#fc8181'), ('Over baseline', f'Rs {val:.2f}Cr', '#fc8181')]), '#e53e3e')
             if len(neg):
-                sc=[c for c in [C_BU,C_ITEMS,C_SUPPLIER,C_HANDLER,C_PO_VAL,C_SAV] if c and c in neg.columns]
-                st.dataframe(neg[sc], width='stretch', height=min(40*len(neg)+50,300))
+                sc = [c for c in [C_BU, 'Project Name', C_ITEMS, C_SUPPLIER, C_HANDLER, C_PO_VAL, C_SAV] if c and c in neg.columns]
+                st.dataframe(neg[sc], width='stretch', height=min(40 * len(neg) + 50, 300))
 
-        # 2. BU match
-        if not matched and C_BU:
-            bu_match = [b for b in adf[C_BU].dropna().unique() if ql in str(b).lower()]
-            if bu_match:
-                matched = True
-                for bu in bu_match:
-                    g = adf[adf[C_BU]==bu]
-                    sp,sv = g['_sp'].sum()/1e7, g['_sv'].sum()/1e7
-                    pct = sv/sp*100 if sp>0 else 0
-                    result_card(f"BU: {bu}",
-                        metric_row([('POs', str(len(g)), '#63b3ed'),
-                                    ('Spend', f'Rs {sp:.2f}Cr', '#fff'),
-                                    ('Savings', f'Rs {sv:.2f}Cr', '#68d391'),
-                                    ('Rate', f'{pct:.1f}%', '#68d391' if pct>=4.5 else '#f6e05e')]))
+        elif any(k in ql for k in ['how many po', 'total po', 'number of po', 'count']):
+            answered = True
+            bubble("PO Count", big_metrics([('Total POs Placed', str(len(adf)), '#63b3ed'), ('Total Spend', f'Rs {total_sp/1e7:.1f}Cr', '#fff'), ('Total Savings', f'Rs {adf["_sv"].sum()/1e7:.2f}Cr', '#68d391')]), '#3b82f6')
 
-        # 3. Buyer match
-        if not matched and C_HANDLER:
-            by_match = [b for b in adf[C_HANDLER].dropna().unique() if ql in str(b).lower()]
-            if by_match:
-                matched = True
-                for by in by_match:
-                    g = adf[adf[C_HANDLER]==by]
-                    sp,sv = g['_sp'].sum()/1e7, g['_sv'].sum()/1e7
-                    pct = sv/sp*100 if sp>0 else 0
-                    result_card(f"Buyer: {by}",
-                        metric_row([('POs', str(len(g)), '#63b3ed'),
-                                    ('Spend', f'Rs {sp:.2f}Cr', '#fff'),
-                                    ('Savings', f'Rs {sv:.2f}Cr', '#68d391'),
-                                    ('Rate', f'{pct:.1f}%', '#68d391' if pct>=4.5 else '#f6e05e')]))
+        if not answered:
+            for col, lbl, clr in [(C_BU, 'BU', '#63b3ed'), (C_HANDLER, 'Buyer', '#a78bfa'), (C_SUPPLIER, 'Vendor', '#f6e05e'), (C_CAT, 'Category', '#68d391')]:
+                if col and col in adf.columns:
+                    matches = [x for x in adf[col].dropna().unique() if ql in str(x).lower()]
+                    if matches:
+                        answered = True
+                        for mv in matches[:4]:
+                            g = adf[adf[col] == mv]
+                            sp = g['_sp'].sum() / 1e7
+                            sv = g['_sv'].sum() / 1e7
+                            pct = sv / sp * 100 if sp > 0 else 0
+                            share = g['_sp'].sum() / total_sp * 100 if total_sp > 0 else 0
+                            extra = ''
+                            if col == C_SUPPLIER:
+                                np_ = g['Project Name'].nunique() if 'Project Name' in g.columns else 0
+                                extra = '<div style="margin-top:8px;font-size:12px;color:#888;">Across ' + str(np_) + ' project(s) · ' + f'{share:.1f}' + '% of total Cat-2 spend</div>'
+                            bubble(f"{lbl}: {mv}",
+                                   big_metrics([('POs', str(len(g)), '#63b3ed'), ('Spend', f'Rs {sp:.2f}Cr', '#fff'), ('Savings', f'Rs {sv:.2f}Cr', '#68d391'), ('Rate', f'{pct:.1f}%', '#68d391' if pct >= 4.5 else '#f6e05e')]) + extra, clr)
+                            other = C_CAT if col == C_SUPPLIER else C_SUPPLIER
+                            sc = [c for c in [C_BU, 'Project Name', C_ITEMS, other, C_HANDLER, 'PO/OD Ref.', C_PO_VAL, C_CUR_ST] if c and c in g.columns]
+                            gd = g[sc].copy()
+                            for c in gd.columns:
+                                if pd.api.types.is_datetime64_any_dtype(gd[c]): gd[c] = gd[c].dt.strftime('%d-%b-%Y')
+                            st.dataframe(gd, width='stretch', height=min(40 * len(gd) + 50, 300))
+                        break
 
-        # 4. Vendor match
-        if not matched and C_SUPPLIER:
-            v_match = [v for v in adf[C_SUPPLIER].dropna().unique() if ql in str(v).lower()]
-            if v_match:
-                matched = True
-                for v in v_match[:5]:
-                    g = adf[adf[C_SUPPLIER]==v]
-                    sp,sv = g['_sp'].sum()/1e7, g['_sv'].sum()/1e7
-                    result_card(f"Vendor: {v}",
-                        metric_row([('POs', str(len(g)), '#63b3ed'),
-                                    ('Spend', f'Rs {sp:.2f}Cr', '#fff'),
-                                    ('Savings', f'Rs {sv:.2f}Cr', '#68d391')]))
-
-        # 5. Category match
-        if not matched and C_CAT:
-            c_match = [c for c in adf[C_CAT].dropna().unique() if ql in str(c).lower()]
-            if c_match:
-                matched = True
-                for cat in c_match[:5]:
-                    g = adf[adf[C_CAT]==cat]
-                    sp,sv = g['_sp'].sum()/1e7, g['_sv'].sum()/1e7
-                    result_card(f"Category: {cat}",
-                        metric_row([('POs', str(len(g)), '#63b3ed'),
-                                    ('Spend', f'Rs {sp:.2f}Cr', '#fff'),
-                                    ('Savings', f'Rs {sv:.2f}Cr', '#68d391')]))
-
-        if not matched:
-            st.markdown('<div class="info-box">No match found. Try a BU (Water, E&R), buyer name, vendor name, category, or keywords like <b>overdue</b> / <b>negative savings</b>.</div>', unsafe_allow_html=True)
+        if not answered:
+            st.markdown('<div class="info-box">I could not match that. Try a BU (Water, E&R), a buyer or vendor name, a category, or questions like <b>top vendors</b>, <b>who saved the most</b>, <b>overdue</b>, <b>negative savings</b>.</div>', unsafe_allow_html=True)
 
 # Footer
 st.markdown(f'<div style="padding:12px 0;border-top:1px solid rgba(255,255,255,.04);margin-top:16px;display:flex;justify-content:space-between;"><div style="font-size:11px;color:#333;">Zetwerk CPT · CAT-2 · FY 2026-27</div><div style="font-size:10px;color:#222;font-family:DM Mono,monospace;">{ts} · TTL 60s</div></div>', unsafe_allow_html=True)
