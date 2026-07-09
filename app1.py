@@ -607,7 +607,7 @@ with t1:
             if C_SAV: fig.add_trace(go.Bar(name='Savings',x=bg[C_BU],y=bg['svc'],marker_color='rgba(56,161,105,.7)',marker_line_width=0))
             apply_dk(fig,height=280,barmode='group',title_text='Spend & Savings by BU (Rs Cr)',
                 legend=dict(orientation='h',y=1.12,x=1,xanchor='right',bgcolor='rgba(0,0,0,0)',font=dict(color='#ddd',size=11)))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
         else:
             st.markdown('<div class="info-box">No POs placed yet.</div>', unsafe_allow_html=True)
     with c2:
@@ -621,7 +621,7 @@ with t1:
             fig2=go.Figure(go.Bar(y=cg[C_CAT],x=cg['v'],orientation='h',marker_color=RED,marker_line_width=0,
                 text=txt,textposition='outside',textfont=dict(color='#ddd',size=10)))
             apply_dk(fig2,height=280,title_text=lbl,showlegend=False)
-            st.plotly_chart(fig2, use_container_width=True)
+            st.plotly_chart(fig2, width='stretch')
 
     st.markdown("#### Procurement Pipeline")
     c1,c2,c3,c4,c5 = st.columns(5)
@@ -825,7 +825,7 @@ with t2:
             legend=dict(orientation='h', y=1.12, x=1, xanchor='right',
                         bgcolor='rgba(0,0,0,0)', font=dict(color='#ddd', size=11))
         )
-        st.plotly_chart(fig3, use_container_width=True)
+        st.plotly_chart(fig3, width='stretch')
 
 # ════ TAB 3 — TAT & OTIF ════════════════════════════════════
 with t3:
@@ -845,7 +845,7 @@ with t3:
                 fig4=go.Figure(go.Bar(x=bt['BU'],y=bt['TAT'],marker_color=[GRN if v<=90 else RED for v in bt['TAT']],marker_line_width=0,text=bt['TAT'].apply(lambda x:f'{x:.0f}d'),textposition='outside',textfont=dict(color='#ddd',size=11)))
                 fig4.add_hline(y=90,line_dash='dash',line_color=AMB,annotation_text='90d',annotation_font_color=AMB)
                 apply_dk(fig4,height=280,title_text='Avg TAT by BU (days)',showlegend=False)
-                st.plotly_chart(fig4, use_container_width=True)
+                st.plotly_chart(fig4, width='stretch')
             else:
                 st.markdown('<div class="info-box">TAT available once POs with valid PR dates are placed. T&D BU POs have no PR date so TAT is excluded.</div>', unsafe_allow_html=True)
         else:
@@ -857,7 +857,7 @@ with t3:
                 fig_h=go.Figure(go.Histogram(x=tv,nbinsx=15,marker_color='rgba(49,130,206,.6)',marker_line_color='rgba(49,130,206,.9)',marker_line_width=1))
                 fig_h.add_vline(x=90,line_dash='dash',line_color=AMB,annotation_text='90d',annotation_font_color=AMB)
                 apply_dk(fig_h,height=280,title_text='TAT Distribution',showlegend=False)
-                st.plotly_chart(fig_h, use_container_width=True)
+                st.plotly_chart(fig_h, width='stretch')
         elif C_PR_DT and len(df_unclosed)>0:
             today=pd.Timestamp(date.today())
             ages=(today-pd.to_datetime(df_unclosed[C_PR_DT],errors='coerce')).dt.days.dropna()
@@ -866,7 +866,7 @@ with t3:
                 fig_a=go.Figure(go.Histogram(x=ages,nbinsx=12,marker_color='rgba(214,158,46,.6)',marker_line_color=AMB,marker_line_width=1))
                 fig_a.add_vline(x=90,line_dash='dash',line_color=RED,annotation_text='90d',annotation_font_color=RED)
                 apply_dk(fig_a,height=280,title_text='Unclosed PR Age (days)',showlegend=False)
-                st.plotly_chart(fig_a, use_container_width=True)
+                st.plotly_chart(fig_a, width='stretch')
     if len(df_otif)>0 and C_OTIF and C_OTIF in df_otif.columns:
         rows=[]
         for bu in df_otif[C_BU].dropna().unique():
@@ -880,7 +880,7 @@ with t3:
             fig5=go.Figure(go.Bar(x=bo['BU'],y=bo['OTIF%'],marker_color=[GRN if v>=75 else RED for v in bo['OTIF%']],marker_line_width=0,text=bo['OTIF%'].apply(lambda x:f'{x:.1f}%'),textposition='outside',textfont=dict(color='#ddd',size=11)))
             fig5.add_hline(y=75,line_dash='dash',line_color=AMB,annotation_text='75%',annotation_font_color=AMB)
             apply_dk(fig5,height=260,title_text='OTIF % by BU',showlegend=False,yaxis_range=[0,115])
-            st.plotly_chart(fig5, use_container_width=True)
+            st.plotly_chart(fig5, width='stretch')
     else:
         st.markdown('<div class="info-box" style="margin-top:12px;">OTIF calculated once Delivery Status = Completed. All current POs are Ongoing.</div>', unsafe_allow_html=True)
 
@@ -913,14 +913,14 @@ with t4:
             if len(pt):
                 fig_pt=go.Figure(go.Bar(y=pt['Term'],x=pt['Count'],orientation='h',marker_color=BLU,marker_line_width=0,text=pt['Count'],textposition='outside',textfont=dict(color='#ddd',size=10)))
                 apply_dk(fig_pt,height=340,title_text='Payment Terms Distribution',showlegend=False)
-                st.plotly_chart(fig_pt, use_container_width=True)
+                st.plotly_chart(fig_pt, width='stretch')
         with c2:
             sv=wcs['_PayScore'].value_counts().sort_index().reset_index(); sv.columns=['Score','Count']
             lm={-2:'Advance',0:'On Dispatch/PDC',1:'IBC 90',2:'IBC 60',3:'VFS/CC15',4:'IBC 45/RXIL',5:'IFC/CC30/LC90',6:'IFC 90',7:'CC 45',8:'CC 60',10:'CC 90'}
             sv['Label']=sv['Score'].apply(lambda s:lm.get(int(s),str(s)))
             fig_sc=go.Figure(go.Bar(x=sv['Label'],y=sv['Count'],marker_color=[RED if s<0 else (AMB if s<4 else GRN) for s in sv['Score']],marker_line_width=0,text=sv['Count'],textposition='outside',textfont=dict(color='#ddd',size=10)))
             apply_dk(fig_sc,height=340,title_text='POs by WC Score Band',showlegend=False)
-            st.plotly_chart(fig_sc, use_container_width=True)
+            st.plotly_chart(fig_sc, width='stretch')
     else:
         st.markdown('<div class="info-box">Working capital data will populate once POs with payment terms are placed.</div>', unsafe_allow_html=True)
 
@@ -964,7 +964,7 @@ with t5:
             fig8.add_hrect(y0=10, y1=15, fillcolor='rgba(56,161,105,.06)', line_width=0)
             apply_dk(fig8, height=280, title_text='NVD % by BU (filled rows only)',
                      showlegend=False, yaxis_range=[0, max(float(nv_bu['NV%'].max())*1.3, 20)])
-            st.plotly_chart(fig8, use_container_width=True)
+            st.plotly_chart(fig8, width='stretch')
         with c2:
             sv2 = df_pos_stype[C_STYPE].value_counts().reset_index()
             sv2.columns = ['Type', 'Count']
@@ -985,7 +985,7 @@ with t5:
                     font=dict(color='#ddd'), margin=dict(l=8,r=8,t=36,b=8),
                     title_text='Supplier Type Mix', legend=dict(font=dict(color='#ddd',size=11), bgcolor='rgba(0,0,0,0)')
                 )
-                st.plotly_chart(fp2, use_container_width=True)
+                st.plotly_chart(fp2, width='stretch')
     else:
         st.markdown('<div class="info-box">Supplier type data will populate once POs are placed.</div>', unsafe_allow_html=True)
 
@@ -1025,7 +1025,7 @@ with t6:
                 sel3=st.session_state.mfc_f==key3
                 with col_w:
                     st.markdown(f'<div style="background:{"rgba(255,255,255,.08)" if sel3 else "rgba(255,255,255,.02)"};border:{"2" if sel3 else "1"}px solid {clr3};border-radius:10px;padding:10px;text-align:center;"><div style="font-size:9px;font-weight:700;color:{clr3};text-transform:uppercase;">{lbl3}</div><div style="font-size:28px;font-weight:800;color:{"#fff" if sel3 else clr3};font-family:DM Mono,monospace;">{count3}</div></div>', unsafe_allow_html=True)
-                    if st.button(f"{'● ' if sel3 else ''}{lbl3}",key=f"mfc_{key3}",use_container_width=True):
+                    if st.button(f"{'● ' if sel3 else ''}{lbl3}",key=f"mfc_{key3}",width='stretch'):
                         st.session_state.mfc_f=key3 if not sel3 else 'ALL'; st.rerun()
             disp=mfc_df if st.session_state.mfc_f=='ALL' else mfc_df[mfc_df['Alert']==st.session_state.mfc_f]
             show=[c for c in ['SN',C_BU,'Project Name',C_ITEMS,C_CAT,C_SUPPLIER,C_HANDLER,'PO/OD Ref.'] if c and c in disp.columns]+['_mfc','_days','Expected','Days Left','Alert']
@@ -1034,7 +1034,7 @@ with t6:
             ast={'OVERDUE':'background:#2a0000;color:#ff9999;font-weight:700;','RED':'background:#1a0000;color:#ff6666;font-weight:700;','AMBER':'background:#1a1000;color:#ffcc66;','GREEN':'background:#001a00;color:#66cc66;'}
             def hl_m(row): s=ast.get(row.get('Alert',''),'')+';font-size:13px;'; return [s]*len(row)
             st.markdown(f"**{len(ds)} POs**")
-            st.dataframe(ds.style.apply(hl_m,axis=1),use_container_width=True,height=min(40*len(ds)+60,700))
+            st.dataframe(ds.style.apply(hl_m,axis=1),width='stretch',height=min(40*len(ds)+60,700))
 
 # ════ TAB 7 — ONGOING POs ════════════════════════════════════
 with t7:
@@ -1071,7 +1071,7 @@ with t7:
         dfo2=dfo.copy()
         for c in dfo2.columns:
             if pd.api.types.is_datetime64_any_dtype(dfo2[c]): dfo2[c]=dfo2[c].dt.strftime('%d-%b-%Y')
-        st.dataframe(dfo2,use_container_width=True,height=min(40*len(dfo)+50,600))
+        st.dataframe(dfo2,width='stretch',height=min(40*len(dfo)+50,600))
 
 # ════ TAB 8 — PR-PO UNCLOSED ════════════════════════════════
 with t8:
@@ -1109,13 +1109,13 @@ with t8:
             bd=fp.groupby(C_BU).size().reset_index(name='Count').sort_values('Count',ascending=False)
             f_p1=go.Figure(go.Bar(x=bd[C_BU],y=bd['Count'],marker_color=RED,marker_line_width=0,text=bd['Count'],textposition='outside',textfont=dict(color='#ddd',size=11)))
             apply_dk(f_p1,height=260,title_text='Unclosed PRs by BU',showlegend=False)
-            st.plotly_chart(f_p1, use_container_width=True)
+            st.plotly_chart(f_p1, width='stretch')
         with c2:
             if C_CUR_ST and C_CUR_ST in fp.columns:
                 sd=fp[C_CUR_ST].fillna('(Blank)').value_counts().head(10).reset_index(); sd.columns=['Status','Count']
                 f_p2=go.Figure(go.Bar(y=sd['Status'],x=sd['Count'],orientation='h',marker_color=AMB,marker_line_width=0,text=sd['Count'],textposition='outside',textfont=dict(color='#ddd',size=10)))
                 apply_dk(f_p2,height=260,title_text='By Current Status',showlegend=False)
-                st.plotly_chart(f_p2, use_container_width=True)
+                st.plotly_chart(f_p2, width='stretch')
         if fp['_age'].notna().any():
             bins=[-1,30,60,90,180,9999]; lbls=['0-30d','31-60d','61-90d','91-180d','>180d']
             clrs=[GRN,AMB,AMB,RED,'#ff0000']
@@ -1123,7 +1123,7 @@ with t8:
             ab=fp['_bucket'].value_counts().reindex(lbls,fill_value=0).reset_index(); ab.columns=['Bucket','Count']
             f_ab=go.Figure(go.Bar(x=ab['Bucket'],y=ab['Count'],marker_color=clrs,marker_line_width=0,text=ab['Count'],textposition='outside',textfont=dict(color='#ddd',size=11)))
             apply_dk(f_ab,height=240,title_text='PR Age Buckets',showlegend=False)
-            st.plotly_chart(f_ab, use_container_width=True)
+            st.plotly_chart(f_ab, width='stretch')
         show_c=[c for c in ['SN',C_BU,'Project Name',C_ITEMS,C_CAT,C_HANDLER,C_PR_DT,C_REV_PR,C_NFA_DT,C_NFA_APP,C_CUR_ST,'_rev_delay','_age'] if c and c in fp.columns]
         ds2=fp[show_c].copy().rename(columns={'_rev_delay':'Rev Delay(d)','_age':'PR Age(d)'})
         for c in ds2.columns:
@@ -1135,7 +1135,7 @@ with t8:
             else: s='color:#ccc;font-size:13px;'
             return [s]*len(row)
         st.markdown(f"**{len(ds2)} unclosed PRs**")
-        st.dataframe(ds2.style.apply(hl_pr,axis=1),use_container_width=True,height=min(40*len(ds2)+50,700))
+        st.dataframe(ds2.style.apply(hl_pr,axis=1),width='stretch',height=min(40*len(ds2)+50,700))
 
 # ════ TAB 9 — VENDOR CONCENTRATION ══════════════════════════
 with t9:
@@ -1215,7 +1215,7 @@ with t9:
                     textposition='outside', textfont=dict(color='#ddd', size=10)))
                 apply_dk(fig_v, height=400, title_text='Top Vendors by Spend', showlegend=False)
                 fig_v.update_xaxes(range=[0, float(top['spend'].max() / 1e7) * 1.28])
-                st.plotly_chart(fig_v, use_container_width=True)
+                st.plotly_chart(fig_v, width='stretch')
             with c2:
                 vc_sorted = vc.sort_values('spend', ascending=False).reset_index(drop=True)
                 vc_sorted['cum_pct'] = vc_sorted['pct'].cumsum()
@@ -1229,7 +1229,7 @@ with t9:
                 apply_dk(fig_p, height=400, title_text='Cumulative Spend (Pareto)', showlegend=False)
                 fig_p.update_xaxes(title_text='Vendors (ranked)')
                 fig_p.update_yaxes(title_text='% of total spend')
-                st.plotly_chart(fig_p, use_container_width=True)
+                st.plotly_chart(fig_p, width='stretch')
 
             # DRILL-DOWN
             st.markdown("#### Drill down — select a vendor to see their POs")
@@ -1262,7 +1262,7 @@ with t9:
                         vgd[c] = vgd[c].dt.strftime('%d-%b-%Y')
                     else:
                         vgd[c] = vgd[c].astype(str).replace({'nan': '', 'None': '', 'NaT': ''})
-                st.dataframe(vgd, use_container_width=True, height=min(40 * len(vgd) + 50, 420))
+                st.dataframe(vgd, width='stretch', height=min(40 * len(vgd) + 50, 420))
 
             neg = vdf[vdf['_sv'] < 0]
             if len(neg) > 0:
@@ -1311,7 +1311,7 @@ with t10:
                     d[c] = d[c].dt.strftime('%d-%b-%Y')
                 else:
                     d[c] = d[c].astype(str).replace({'nan': '', 'None': '', 'NaT': ''})
-            st.dataframe(d, use_container_width=True, height=min(40 * len(d) + 50, maxh))
+            st.dataframe(d, width='stretch', height=min(40 * len(d) + 50, maxh))
 
         def big_metrics(pairs):
             cells = ''.join(
