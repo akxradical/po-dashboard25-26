@@ -74,19 +74,27 @@ def safe_num(series):
 
 @st.cache_data(ttl=60, show_spinner=False)
 def load_po_tracker():
+    import time
+    last_err = ""
+    for _attempt in range(3):   # retry transient Google API hiccups
+        try:
+            gc = gclient()
+            sh = gc.open_by_key(SHEET_ID)
+            ws = None
+            for tab in ["PO TRACKER  27","PO TRACKER ' 27","PO TRACKER '27","PO TRACKER"]:
+                try: ws = sh.worksheet(tab); break
+                except: continue
+            if not ws:
+                return pd.DataFrame(), f"Tab not found. Available: {[s.title for s in sh.worksheets()]}"
+            data = ws.get_all_values(value_render_option='FORMATTED_VALUE')
+            if len(data) < 2:
+                last_err = "Sheet returned no data"; time.sleep(1.2); continue
+            break
+        except Exception as e:
+            last_err = str(e); time.sleep(1.2)
+    else:
+        return pd.DataFrame(), f"Could not read sheet after 3 tries: {last_err}"
     try:
-        gc = gclient()
-        sh = gc.open_by_key(SHEET_ID)
-        ws = None
-        for tab in ["PO TRACKER  27","PO TRACKER ' 27","PO TRACKER '27","PO TRACKER"]:
-            try: ws = sh.worksheet(tab); break
-            except: continue
-        if not ws:
-            return pd.DataFrame(), f"Tab not found. Available: {[s.title for s in sh.worksheets()]}"
-        data = ws.get_all_values(value_render_option='FORMATTED_VALUE')
-        if len(data) < 2: return pd.DataFrame(), "Sheet is empty"
-
-        # Auto-detect the header row — find the row that contains 'BU' and 'SN'
         # (the sheet sometimes has a blank/title row above the headers)
         hdr_idx = 0
         for idx in range(min(5, len(data))):
@@ -599,7 +607,7 @@ with t1:
             if C_SAV: fig.add_trace(go.Bar(name='Savings',x=bg[C_BU],y=bg['svc'],marker_color='rgba(56,161,105,.7)',marker_line_width=0))
             apply_dk(fig,height=280,barmode='group',title_text='Spend & Savings by BU (Rs Cr)',
                 legend=dict(orientation='h',y=1.12,x=1,xanchor='right',bgcolor='rgba(0,0,0,0)',font=dict(color='#ddd',size=11)))
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig, use_container_width=True)
         else:
             st.markdown('<div class="info-box">No POs placed yet.</div>', unsafe_allow_html=True)
     with c2:
@@ -613,7 +621,7 @@ with t1:
             fig2=go.Figure(go.Bar(y=cg[C_CAT],x=cg['v'],orientation='h',marker_color=RED,marker_line_width=0,
                 text=txt,textposition='outside',textfont=dict(color='#ddd',size=10)))
             apply_dk(fig2,height=280,title_text=lbl,showlegend=False)
-            st.plotly_chart(fig2, width='stretch')
+            st.plotly_chart(fig2, use_container_width=True)
 
     st.markdown("#### Procurement Pipeline")
     c1,c2,c3,c4,c5 = st.columns(5)
@@ -817,7 +825,7 @@ with t2:
             legend=dict(orientation='h', y=1.12, x=1, xanchor='right',
                         bgcolor='rgba(0,0,0,0)', font=dict(color='#ddd', size=11))
         )
-        st.plotly_chart(fig3, width='stretch')
+        st.plotly_chart(fig3, use_container_width=True)
 
 # ════ TAB 3 — TAT & OTIF ════════════════════════════════════
 with t3:
@@ -837,7 +845,7 @@ with t3:
                 fig4=go.Figure(go.Bar(x=bt['BU'],y=bt['TAT'],marker_color=[GRN if v<=90 else RED for v in bt['TAT']],marker_line_width=0,text=bt['TAT'].apply(lambda x:f'{x:.0f}d'),textposition='outside',textfont=dict(color='#ddd',size=11)))
                 fig4.add_hline(y=90,line_dash='dash',line_color=AMB,annotation_text='90d',annotation_font_color=AMB)
                 apply_dk(fig4,height=280,title_text='Avg TAT by BU (days)',showlegend=False)
-                st.plotly_chart(fig4, width='stretch')
+                st.plotly_chart(fig4, use_container_width=True)
             else:
                 st.markdown('<div class="info-box">TAT available once POs with valid PR dates are placed. T&D BU POs have no PR date so TAT is excluded.</div>', unsafe_allow_html=True)
         else:
@@ -849,7 +857,7 @@ with t3:
                 fig_h=go.Figure(go.Histogram(x=tv,nbinsx=15,marker_color='rgba(49,130,206,.6)',marker_line_color='rgba(49,130,206,.9)',marker_line_width=1))
                 fig_h.add_vline(x=90,line_dash='dash',line_color=AMB,annotation_text='90d',annotation_font_color=AMB)
                 apply_dk(fig_h,height=280,title_text='TAT Distribution',showlegend=False)
-                st.plotly_chart(fig_h, width='stretch')
+                st.plotly_chart(fig_h, use_container_width=True)
         elif C_PR_DT and len(df_unclosed)>0:
             today=pd.Timestamp(date.today())
             ages=(today-pd.to_datetime(df_unclosed[C_PR_DT],errors='coerce')).dt.days.dropna()
@@ -858,7 +866,7 @@ with t3:
                 fig_a=go.Figure(go.Histogram(x=ages,nbinsx=12,marker_color='rgba(214,158,46,.6)',marker_line_color=AMB,marker_line_width=1))
                 fig_a.add_vline(x=90,line_dash='dash',line_color=RED,annotation_text='90d',annotation_font_color=RED)
                 apply_dk(fig_a,height=280,title_text='Unclosed PR Age (days)',showlegend=False)
-                st.plotly_chart(fig_a, width='stretch')
+                st.plotly_chart(fig_a, use_container_width=True)
     if len(df_otif)>0 and C_OTIF and C_OTIF in df_otif.columns:
         rows=[]
         for bu in df_otif[C_BU].dropna().unique():
@@ -872,7 +880,7 @@ with t3:
             fig5=go.Figure(go.Bar(x=bo['BU'],y=bo['OTIF%'],marker_color=[GRN if v>=75 else RED for v in bo['OTIF%']],marker_line_width=0,text=bo['OTIF%'].apply(lambda x:f'{x:.1f}%'),textposition='outside',textfont=dict(color='#ddd',size=11)))
             fig5.add_hline(y=75,line_dash='dash',line_color=AMB,annotation_text='75%',annotation_font_color=AMB)
             apply_dk(fig5,height=260,title_text='OTIF % by BU',showlegend=False,yaxis_range=[0,115])
-            st.plotly_chart(fig5, width='stretch')
+            st.plotly_chart(fig5, use_container_width=True)
     else:
         st.markdown('<div class="info-box" style="margin-top:12px;">OTIF calculated once Delivery Status = Completed. All current POs are Ongoing.</div>', unsafe_allow_html=True)
 
@@ -905,14 +913,14 @@ with t4:
             if len(pt):
                 fig_pt=go.Figure(go.Bar(y=pt['Term'],x=pt['Count'],orientation='h',marker_color=BLU,marker_line_width=0,text=pt['Count'],textposition='outside',textfont=dict(color='#ddd',size=10)))
                 apply_dk(fig_pt,height=340,title_text='Payment Terms Distribution',showlegend=False)
-                st.plotly_chart(fig_pt, width='stretch')
+                st.plotly_chart(fig_pt, use_container_width=True)
         with c2:
             sv=wcs['_PayScore'].value_counts().sort_index().reset_index(); sv.columns=['Score','Count']
             lm={-2:'Advance',0:'On Dispatch/PDC',1:'IBC 90',2:'IBC 60',3:'VFS/CC15',4:'IBC 45/RXIL',5:'IFC/CC30/LC90',6:'IFC 90',7:'CC 45',8:'CC 60',10:'CC 90'}
             sv['Label']=sv['Score'].apply(lambda s:lm.get(int(s),str(s)))
             fig_sc=go.Figure(go.Bar(x=sv['Label'],y=sv['Count'],marker_color=[RED if s<0 else (AMB if s<4 else GRN) for s in sv['Score']],marker_line_width=0,text=sv['Count'],textposition='outside',textfont=dict(color='#ddd',size=10)))
             apply_dk(fig_sc,height=340,title_text='POs by WC Score Band',showlegend=False)
-            st.plotly_chart(fig_sc, width='stretch')
+            st.plotly_chart(fig_sc, use_container_width=True)
     else:
         st.markdown('<div class="info-box">Working capital data will populate once POs with payment terms are placed.</div>', unsafe_allow_html=True)
 
@@ -956,7 +964,7 @@ with t5:
             fig8.add_hrect(y0=10, y1=15, fillcolor='rgba(56,161,105,.06)', line_width=0)
             apply_dk(fig8, height=280, title_text='NVD % by BU (filled rows only)',
                      showlegend=False, yaxis_range=[0, max(float(nv_bu['NV%'].max())*1.3, 20)])
-            st.plotly_chart(fig8, width='stretch')
+            st.plotly_chart(fig8, use_container_width=True)
         with c2:
             sv2 = df_pos_stype[C_STYPE].value_counts().reset_index()
             sv2.columns = ['Type', 'Count']
@@ -977,7 +985,7 @@ with t5:
                     font=dict(color='#ddd'), margin=dict(l=8,r=8,t=36,b=8),
                     title_text='Supplier Type Mix', legend=dict(font=dict(color='#ddd',size=11), bgcolor='rgba(0,0,0,0)')
                 )
-                st.plotly_chart(fp2, width='stretch')
+                st.plotly_chart(fp2, use_container_width=True)
     else:
         st.markdown('<div class="info-box">Supplier type data will populate once POs are placed.</div>', unsafe_allow_html=True)
 
@@ -1026,7 +1034,7 @@ with t6:
             ast={'OVERDUE':'background:#2a0000;color:#ff9999;font-weight:700;','RED':'background:#1a0000;color:#ff6666;font-weight:700;','AMBER':'background:#1a1000;color:#ffcc66;','GREEN':'background:#001a00;color:#66cc66;'}
             def hl_m(row): s=ast.get(row.get('Alert',''),'')+';font-size:13px;'; return [s]*len(row)
             st.markdown(f"**{len(ds)} POs**")
-            st.dataframe(ds.style.apply(hl_m,axis=1),width='stretch',height=min(40*len(ds)+60,700))
+            st.dataframe(ds.style.apply(hl_m,axis=1),use_container_width=True,height=min(40*len(ds)+60,700))
 
 # ════ TAB 7 — ONGOING POs ════════════════════════════════════
 with t7:
@@ -1063,7 +1071,7 @@ with t7:
         dfo2=dfo.copy()
         for c in dfo2.columns:
             if pd.api.types.is_datetime64_any_dtype(dfo2[c]): dfo2[c]=dfo2[c].dt.strftime('%d-%b-%Y')
-        st.dataframe(dfo2,width='stretch',height=min(40*len(dfo)+50,600))
+        st.dataframe(dfo2,use_container_width=True,height=min(40*len(dfo)+50,600))
 
 # ════ TAB 8 — PR-PO UNCLOSED ════════════════════════════════
 with t8:
@@ -1101,13 +1109,13 @@ with t8:
             bd=fp.groupby(C_BU).size().reset_index(name='Count').sort_values('Count',ascending=False)
             f_p1=go.Figure(go.Bar(x=bd[C_BU],y=bd['Count'],marker_color=RED,marker_line_width=0,text=bd['Count'],textposition='outside',textfont=dict(color='#ddd',size=11)))
             apply_dk(f_p1,height=260,title_text='Unclosed PRs by BU',showlegend=False)
-            st.plotly_chart(f_p1, width='stretch')
+            st.plotly_chart(f_p1, use_container_width=True)
         with c2:
             if C_CUR_ST and C_CUR_ST in fp.columns:
                 sd=fp[C_CUR_ST].fillna('(Blank)').value_counts().head(10).reset_index(); sd.columns=['Status','Count']
                 f_p2=go.Figure(go.Bar(y=sd['Status'],x=sd['Count'],orientation='h',marker_color=AMB,marker_line_width=0,text=sd['Count'],textposition='outside',textfont=dict(color='#ddd',size=10)))
                 apply_dk(f_p2,height=260,title_text='By Current Status',showlegend=False)
-                st.plotly_chart(f_p2, width='stretch')
+                st.plotly_chart(f_p2, use_container_width=True)
         if fp['_age'].notna().any():
             bins=[-1,30,60,90,180,9999]; lbls=['0-30d','31-60d','61-90d','91-180d','>180d']
             clrs=[GRN,AMB,AMB,RED,'#ff0000']
@@ -1115,7 +1123,7 @@ with t8:
             ab=fp['_bucket'].value_counts().reindex(lbls,fill_value=0).reset_index(); ab.columns=['Bucket','Count']
             f_ab=go.Figure(go.Bar(x=ab['Bucket'],y=ab['Count'],marker_color=clrs,marker_line_width=0,text=ab['Count'],textposition='outside',textfont=dict(color='#ddd',size=11)))
             apply_dk(f_ab,height=240,title_text='PR Age Buckets',showlegend=False)
-            st.plotly_chart(f_ab, width='stretch')
+            st.plotly_chart(f_ab, use_container_width=True)
         show_c=[c for c in ['SN',C_BU,'Project Name',C_ITEMS,C_CAT,C_HANDLER,C_PR_DT,C_REV_PR,C_NFA_DT,C_NFA_APP,C_CUR_ST,'_rev_delay','_age'] if c and c in fp.columns]
         ds2=fp[show_c].copy().rename(columns={'_rev_delay':'Rev Delay(d)','_age':'PR Age(d)'})
         for c in ds2.columns:
@@ -1127,251 +1135,286 @@ with t8:
             else: s='color:#ccc;font-size:13px;'
             return [s]*len(row)
         st.markdown(f"**{len(ds2)} unclosed PRs**")
-        st.dataframe(ds2.style.apply(hl_pr,axis=1),width='stretch',height=min(40*len(ds2)+50,700))
+        st.dataframe(ds2.style.apply(hl_pr,axis=1),use_container_width=True,height=min(40*len(ds2)+50,700))
 
 # ════ TAB 9 — VENDOR CONCENTRATION ══════════════════════════
 with t9:
-    st.markdown("### Vendor Concentration & Spend Risk")
-    if C_SUPPLIER and C_SUPPLIER in df_pos.columns and C_PO_VAL and len(df_pos) > 0:
-        vdf = df_pos.copy()
-        vdf['_sp'] = pd.to_numeric(vdf[C_PO_VAL], errors='coerce').fillna(0)
-        vdf['_sv'] = pd.to_numeric(vdf[C_SAV], errors='coerce').fillna(0) if C_SAV else 0
-        vdf = vdf[vdf[C_SUPPLIER].astype(str).str.strip().replace({'nan': '', 'None': ''}).ne('')]
+    try:
+        st.markdown("### Vendor Concentration & Spend Risk")
+        if C_SUPPLIER and C_SUPPLIER in df_pos.columns and C_PO_VAL and len(df_pos) > 0:
+            vdf = df_pos.copy()
+            vdf['_sp'] = pd.to_numeric(vdf[C_PO_VAL], errors='coerce').fillna(0)
+            vdf['_sv'] = pd.to_numeric(vdf[C_SAV], errors='coerce').fillna(0) if C_SAV else 0
+            vdf = vdf[vdf[C_SUPPLIER].astype(str).str.strip().replace({'nan': '', 'None': ''}).ne('')]
 
-        vc = vdf.groupby(C_SUPPLIER).agg(
-            spend=('_sp', 'sum'), savings=('_sv', 'sum'), pos=('_sp', 'count')
-        ).reset_index().sort_values('spend', ascending=False)
-        total_sp = vc['spend'].sum()
-        vc['pct'] = vc['spend'] / total_sp * 100 if total_sp > 0 else 0
+            vc = vdf.groupby(C_SUPPLIER).agg(
+                spend=('_sp', 'sum'), savings=('_sv', 'sum'), pos=('_sp', 'count')
+            ).reset_index().sort_values('spend', ascending=False)
+            total_sp = vc['spend'].sum()
+            vc['pct'] = vc['spend'] / total_sp * 100 if total_sp > 0 else 0
 
-        top5_pct = vc.head(5)['pct'].sum()
-        top10_pct = vc.head(10)['pct'].sum()
-        n_vendors = len(vc)
-        hhi = ((vc['pct']) ** 2).sum()
-        conc_label = 'HIGH' if top5_pct >= 70 else ('MODERATE' if top5_pct >= 50 else 'LOW')
-        conc_color = '#e53e3e' if top5_pct >= 70 else ('#d69e2e' if top5_pct >= 50 else '#38a169')
+            top5_pct = vc.head(5)['pct'].sum()
+            top10_pct = vc.head(10)['pct'].sum()
+            n_vendors = len(vc)
+            hhi = ((vc['pct']) ** 2).sum()
+            conc_label = 'HIGH' if top5_pct >= 70 else ('MODERATE' if top5_pct >= 50 else 'LOW')
+            conc_color = '#e53e3e' if top5_pct >= 70 else ('#d69e2e' if top5_pct >= 50 else '#38a169')
 
-        c1, c2, c3, c4 = st.columns(4)
-        with c1: st.metric("Total Vendors", str(n_vendors))
-        with c2: st.metric("Top 5 Spend Share", f"{top5_pct:.1f}%", conc_label)
-        with c3: st.metric("Top 10 Spend Share", f"{top10_pct:.1f}%")
-        with c4: st.metric("Concentration (HHI)", f"{hhi:.0f}", "Concentrated" if hhi > 2500 else "Diversified")
+            c1, c2, c3, c4 = st.columns(4)
+            with c1: st.metric("Total Vendors", str(n_vendors))
+            with c2: st.metric("Top 5 Spend Share", f"{top5_pct:.1f}%", conc_label)
+            with c3: st.metric("Top 10 Spend Share", f"{top10_pct:.1f}%")
+            with c4: st.metric("Concentration (HHI)", f"{hhi:.0f}", "Concentrated" if hhi > 2500 else "Diversified")
 
-        st.markdown(
-            '<div class="info-box" style="border-left-color:' + conc_color + ';margin:8px 0 14px;">'
-            + '<b style="color:' + conc_color + ';">' + conc_label + ' concentration.</b> '
-            + 'Top 5 vendors carry ' + f'{top5_pct:.1f}' + '% of total spend (Rs '
-            + f'{vc.head(5)["spend"].sum()/1e7:.1f}' + ' Cr of Rs ' + f'{total_sp/1e7:.1f}'
-            + ' Cr). A delay or price move from any top vendor has outsized impact.</div>',
-            unsafe_allow_html=True)
-
-        c1, c2 = st.columns([1.3, 1])
-        with c1:
-            top = vc.head(12).copy()
-            top['label'] = top[C_SUPPLIER].astype(str).str[:26]
-            fig_v = go.Figure(go.Bar(
-                y=top['label'][::-1], x=top['spend'][::-1] / 1e7, orientation='h',
-                marker_color=[('#e53e3e' if p >= 15 else ('#d69e2e' if p >= 5 else BLU)) for p in top['pct'][::-1]],
-                marker_line_width=0,
-                text=[f'Rs {s/1e7:.1f}Cr ({p:.0f}%)' for s, p in zip(top['spend'][::-1], top['pct'][::-1])],
-                textposition='outside', textfont=dict(color='#ddd', size=10)))
-            apply_dk(fig_v, height=400, title_text='Top Vendors by Spend', showlegend=False)
-            fig_v.update_xaxes(range=[0, float(top['spend'].max() / 1e7) * 1.28])
-            st.plotly_chart(fig_v, width='stretch')
-        with c2:
-            vc_sorted = vc.sort_values('spend', ascending=False).reset_index(drop=True)
-            vc_sorted['cum_pct'] = vc_sorted['pct'].cumsum()
-            fig_p = go.Figure()
-            fig_p.add_trace(go.Scatter(
-                x=list(range(1, len(vc_sorted) + 1)), y=vc_sorted['cum_pct'],
-                mode='lines', line=dict(color=RED, width=2.5), fill='tozeroy',
-                fillcolor='rgba(229,62,62,.08)'))
-            fig_p.add_hline(y=80, line_dash='dash', line_color=AMB,
-                            annotation_text='80% of spend', annotation_font_color=AMB)
-            apply_dk(fig_p, height=400, title_text='Cumulative Spend (Pareto)', showlegend=False)
-            fig_p.update_xaxes(title_text='Vendors (ranked)')
-            fig_p.update_yaxes(title_text='% of total spend')
-            st.plotly_chart(fig_p, width='stretch')
-
-        # DRILL-DOWN
-        st.markdown("#### Drill down — select a vendor to see their POs")
-        # Precompute display labels once (avoids per-render lookups that can crash)
-        vc_lbl = vc.copy()
-        vc_lbl['_label'] = vc_lbl.apply(
-            lambda r: f"{str(r[C_SUPPLIER])[:40]}  —  Rs {r['spend']/1e7:.2f}Cr  ({int(r['pos'])} POs)", axis=1)
-        label_to_vendor = dict(zip(vc_lbl['_label'], vc_lbl[C_SUPPLIER]))
-        sel_label = st.selectbox("Vendor", vc_lbl['_label'].tolist(), label_visibility="collapsed", key="vendor_drill")
-        sel_v = label_to_vendor.get(sel_label)
-        if sel_v is not None:
-            vg = vdf[vdf[C_SUPPLIER] == sel_v]
-            sp = vg['_sp'].sum() / 1e7
-            sv = vg['_sv'].sum() / 1e7
-            share = vg['_sp'].sum() / total_sp * 100 if total_sp > 0 else 0
-            nproj = vg['Project Name'].nunique() if 'Project Name' in vg.columns else 0
-            nbu = vg[C_BU].nunique() if C_BU in vg.columns else 0
-            m1, m2, m3, m4, m5 = st.columns(5)
-            with m1: st.metric("POs", str(len(vg)))
-            with m2: st.metric("Total Spend", f"Rs {sp:.2f}Cr")
-            with m3: st.metric("Savings", f"Rs {sv:.2f}Cr")
-            with m4: st.metric("% of Cat-2 Spend", f"{share:.1f}%")
-            with m5: st.metric("Projects / BUs", f"{nproj} / {nbu}")
-
-            show_v = [c for c in ['SN', C_BU, 'Project Name', C_ITEMS, C_CAT, C_HANDLER, 'PO/OD Ref.', C_PO_VAL, C_SAV, C_SAV_PCT, C_CUR_ST] if c and c in vg.columns]
-            vgd = vg[show_v].copy()
-            # Force every column to a clean string so Streamlit/Arrow never crashes on mixed types
-            for c in vgd.columns:
-                if pd.api.types.is_datetime64_any_dtype(vgd[c]):
-                    vgd[c] = vgd[c].dt.strftime('%d-%b-%Y')
-                else:
-                    vgd[c] = vgd[c].astype(str).replace({'nan': '', 'None': '', 'NaT': ''})
-            st.dataframe(vgd, width='stretch', height=min(40 * len(vgd) + 50, 420))
-
-        neg = vdf[vdf['_sv'] < 0]
-        if len(neg) > 0:
-            neg_val = abs(neg['_sv'].sum()) / 1e7
             st.markdown(
-                '<div class="info-box" style="border-left-color:#e53e3e;margin-top:12px;">'
-                + '<b style="color:#fc8181;">Savings leakage:</b> ' + str(len(neg))
-                + ' PO(s) placed <b>above</b> baseline, totalling Rs ' + f'{neg_val:.2f}'
-                + ' Cr over benchmark.</div>', unsafe_allow_html=True)
-    else:
-        st.markdown('<div class="info-box">Vendor data will populate once POs with supplier names are placed.</div>', unsafe_allow_html=True)
+                '<div class="info-box" style="border-left-color:' + conc_color + ';margin:8px 0 14px;">'
+                + '<b style="color:' + conc_color + ';">' + conc_label + ' concentration.</b> '
+                + 'Top 5 vendors carry ' + f'{top5_pct:.1f}' + '% of total spend (Rs '
+                + f'{vc.head(5)["spend"].sum()/1e7:.1f}' + ' Cr of Rs ' + f'{total_sp/1e7:.1f}'
+                + ' Cr). A delay or price move from any top vendor has outsized impact.</div>',
+                unsafe_allow_html=True)
 
+            # ── HHI professional insight panel ──
+            if hhi >= 2500:
+                hhi_band, hhi_col, hhi_msg = "Highly Concentrated", "#e53e3e", "A few vendors dominate spend. Single-vendor disruption (delay, price hike, quality issue, insolvency) would hit a large share of procurement. Diversification is advisable for critical categories."
+            elif hhi >= 1500:
+                hhi_band, hhi_col, hhi_msg = "Moderately Concentrated", "#d69e2e", "Spend leans on a handful of vendors. Manageable, but worth monitoring — developing backup vendors for the top spend categories reduces exposure."
+            else:
+                hhi_band, hhi_col, hhi_msg = "Diversified", "#38a169", "Spend is well spread across many vendors. Low dependency risk — no single vendor failure would materially disrupt procurement."
+
+            top1_name = str(vc.iloc[0][C_SUPPLIER])[:30] if len(vc) else "—"
+            top1_pct  = vc.iloc[0]['pct'] if len(vc) else 0
+            top2_pct  = vc.iloc[:2]['pct'].sum() if len(vc) >= 2 else top1_pct
+
+            st.markdown(
+                '<div style="background:#13131a;border:1px solid rgba(255,255,255,.08);border-left:3px solid ' + hhi_col + ';border-radius:14px;padding:18px 22px;margin:4px 0 16px;">'
+                + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;">'
+                + '<span style="font-size:13px;font-weight:700;color:#fff;">Herfindahl-Hirschman Index (HHI)</span>'
+                + '<span style="font-size:13px;font-weight:800;color:' + hhi_col + ';font-family:DM Mono,monospace;">' + f'{hhi:.0f}' + ' · ' + hhi_band + '</span></div>'
+                + '<div style="font-size:12px;color:#aaa;line-height:1.65;margin-bottom:12px;">'
+                + '<b style="color:#ddd;">What it is:</b> HHI is the standard measure of market concentration used by economists and competition regulators. It is the sum of every vendor\'s squared share of total spend. Squaring means large vendors count far more heavily, so the index rises sharply when few vendors dominate.</div>'
+                + '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">'
+                + '<div style="flex:1;min-width:120px;text-align:center;padding:8px;border-radius:8px;background:rgba(56,161,105,' + ('.18' if hhi<1500 else '.05') + ');border:1px solid rgba(56,161,105,.2);"><div style="font-size:15px;font-weight:800;color:#68d391;font-family:DM Mono,monospace;">&lt; 1500</div><div style="font-size:9px;color:#888;text-transform:uppercase;letter-spacing:.05em;margin-top:2px;">Diversified</div></div>'
+                + '<div style="flex:1;min-width:120px;text-align:center;padding:8px;border-radius:8px;background:rgba(214,158,46,' + ('.18' if 1500<=hhi<2500 else '.05') + ');border:1px solid rgba(214,158,46,.2);"><div style="font-size:15px;font-weight:800;color:#f6e05e;font-family:DM Mono,monospace;">1500–2500</div><div style="font-size:9px;color:#888;text-transform:uppercase;letter-spacing:.05em;margin-top:2px;">Moderate</div></div>'
+                + '<div style="flex:1;min-width:120px;text-align:center;padding:8px;border-radius:8px;background:rgba(229,62,62,' + ('.18' if hhi>=2500 else '.05') + ');border:1px solid rgba(229,62,62,.2);"><div style="font-size:15px;font-weight:800;color:#fc8181;font-family:DM Mono,monospace;">&gt; 2500</div><div style="font-size:9px;color:#888;text-transform:uppercase;letter-spacing:.05em;margin-top:2px;">Concentrated</div></div></div>'
+                + '<div style="font-size:12px;color:#aaa;line-height:1.65;"><b style="color:' + hhi_col + ';">Impact for Cat-2:</b> ' + hhi_msg + '</div>'
+                + '<div style="font-size:12px;color:#888;line-height:1.6;margin-top:8px;border-top:1px solid rgba(255,255,255,.05);padding-top:10px;">'
+                + 'Your score is driven mainly by <b style="color:#ddd;">' + top1_name + '</b> (' + f'{top1_pct:.0f}' + '% of spend)'
+                + (', and your top 2 vendors together = <b style="color:#ddd;">' + f'{top2_pct:.0f}' + '%</b>.' if len(vc)>=2 else '.') + '</div></div>',
+                unsafe_allow_html=True)
+
+            c1, c2 = st.columns([1.3, 1])
+            with c1:
+                top = vc.head(12).copy()
+                top['label'] = top[C_SUPPLIER].astype(str).str[:26]
+                fig_v = go.Figure(go.Bar(
+                    y=top['label'][::-1], x=top['spend'][::-1] / 1e7, orientation='h',
+                    marker_color=[('#e53e3e' if p >= 15 else ('#d69e2e' if p >= 5 else BLU)) for p in top['pct'][::-1]],
+                    marker_line_width=0,
+                    text=[f'Rs {s/1e7:.1f}Cr ({p:.0f}%)' for s, p in zip(top['spend'][::-1], top['pct'][::-1])],
+                    textposition='outside', textfont=dict(color='#ddd', size=10)))
+                apply_dk(fig_v, height=400, title_text='Top Vendors by Spend', showlegend=False)
+                fig_v.update_xaxes(range=[0, float(top['spend'].max() / 1e7) * 1.28])
+                st.plotly_chart(fig_v, use_container_width=True)
+            with c2:
+                vc_sorted = vc.sort_values('spend', ascending=False).reset_index(drop=True)
+                vc_sorted['cum_pct'] = vc_sorted['pct'].cumsum()
+                fig_p = go.Figure()
+                fig_p.add_trace(go.Scatter(
+                    x=list(range(1, len(vc_sorted) + 1)), y=vc_sorted['cum_pct'],
+                    mode='lines', line=dict(color=RED, width=2.5), fill='tozeroy',
+                    fillcolor='rgba(229,62,62,.08)'))
+                fig_p.add_hline(y=80, line_dash='dash', line_color=AMB,
+                                annotation_text='80% of spend', annotation_font_color=AMB)
+                apply_dk(fig_p, height=400, title_text='Cumulative Spend (Pareto)', showlegend=False)
+                fig_p.update_xaxes(title_text='Vendors (ranked)')
+                fig_p.update_yaxes(title_text='% of total spend')
+                st.plotly_chart(fig_p, use_container_width=True)
+
+            # DRILL-DOWN
+            st.markdown("#### Drill down — select a vendor to see their POs")
+            # Precompute display labels once (avoids per-render lookups that can crash)
+            vc_lbl = vc.copy()
+            vc_lbl['_label'] = vc_lbl.apply(
+                lambda r: f"{str(r[C_SUPPLIER])[:40]}  —  Rs {r['spend']/1e7:.2f}Cr  ({int(r['pos'])} POs)", axis=1)
+            label_to_vendor = dict(zip(vc_lbl['_label'], vc_lbl[C_SUPPLIER]))
+            sel_label = st.selectbox("Vendor", vc_lbl['_label'].tolist(), label_visibility="collapsed", key="vendor_drill")
+            sel_v = label_to_vendor.get(sel_label)
+            if sel_v is not None:
+                vg = vdf[vdf[C_SUPPLIER] == sel_v]
+                sp = vg['_sp'].sum() / 1e7
+                sv = vg['_sv'].sum() / 1e7
+                share = vg['_sp'].sum() / total_sp * 100 if total_sp > 0 else 0
+                nproj = vg['Project Name'].nunique() if 'Project Name' in vg.columns else 0
+                nbu = vg[C_BU].nunique() if C_BU in vg.columns else 0
+                m1, m2, m3, m4, m5 = st.columns(5)
+                with m1: st.metric("POs", str(len(vg)))
+                with m2: st.metric("Total Spend", f"Rs {sp:.2f}Cr")
+                with m3: st.metric("Savings", f"Rs {sv:.2f}Cr")
+                with m4: st.metric("% of Cat-2 Spend", f"{share:.1f}%")
+                with m5: st.metric("Projects / BUs", f"{nproj} / {nbu}")
+
+                show_v = [c for c in ['SN', C_BU, 'Project Name', C_ITEMS, C_CAT, C_HANDLER, 'PO/OD Ref.', C_PO_VAL, C_SAV, C_SAV_PCT, C_CUR_ST] if c and c in vg.columns]
+                vgd = vg[show_v].copy()
+                # Force every column to a clean string so Streamlit/Arrow never crashes on mixed types
+                for c in vgd.columns:
+                    if pd.api.types.is_datetime64_any_dtype(vgd[c]):
+                        vgd[c] = vgd[c].dt.strftime('%d-%b-%Y')
+                    else:
+                        vgd[c] = vgd[c].astype(str).replace({'nan': '', 'None': '', 'NaT': ''})
+                st.dataframe(vgd, use_container_width=True, height=min(40 * len(vgd) + 50, 420))
+
+            neg = vdf[vdf['_sv'] < 0]
+            if len(neg) > 0:
+                neg_val = abs(neg['_sv'].sum()) / 1e7
+                st.markdown(
+                    '<div class="info-box" style="border-left-color:#e53e3e;margin-top:12px;">'
+                    + '<b style="color:#fc8181;">Savings leakage:</b> ' + str(len(neg))
+                    + ' PO(s) placed <b>above</b> baseline, totalling Rs ' + f'{neg_val:.2f}'
+                    + ' Cr over benchmark.</div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="info-box">Vendor data will populate once POs with supplier names are placed.</div>', unsafe_allow_html=True)
+
+    except Exception as _e:
+        st.error("This tab hit an error: " + str(_e))
 # ════ TAB 10 — ASK DATA (conversational, no LLM) ════════════
 with t10:
-    st.markdown("### Ask the Data")
-    st.markdown('<div style="font-size:13px;color:#888;margin-bottom:14px;">Ask about any BU, buyer, vendor, or category — or try a question. No AI, just instant answers computed live from your data.</div>', unsafe_allow_html=True)
+    try:
+        st.markdown("### Ask the Data")
+        st.markdown('<div style="font-size:13px;color:#888;margin-bottom:14px;">Ask about any BU, buyer, vendor, or category — or try a question. No AI, just instant answers computed live from your data.</div>', unsafe_allow_html=True)
 
-    chip_html = (
-        '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;">'
-        '<span style="background:rgba(108,99,255,.12);border:1px solid rgba(108,99,255,.25);color:#a78bfa;padding:5px 12px;border-radius:16px;font-size:12px;">Try: top vendors</span>'
-        '<span style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.25);color:#68d391;padding:5px 12px;border-radius:16px;font-size:12px;">who saved the most</span>'
-        '<span style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25);color:#fc8181;padding:5px 12px;border-radius:16px;font-size:12px;">overdue</span>'
-        '<span style="background:rgba(234,179,8,.1);border:1px solid rgba(234,179,8,.25);color:#f6e05e;padding:5px 12px;border-radius:16px;font-size:12px;">Water</span>'
-        '<span style="background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.25);color:#63b3ed;padding:5px 12px;border-radius:16px;font-size:12px;">negative savings</span>'
-        '</div>')
-    st.markdown(chip_html, unsafe_allow_html=True)
+        chip_html = (
+            '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;">'
+            '<span style="background:rgba(108,99,255,.12);border:1px solid rgba(108,99,255,.25);color:#a78bfa;padding:5px 12px;border-radius:16px;font-size:12px;">Try: top vendors</span>'
+            '<span style="background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.25);color:#68d391;padding:5px 12px;border-radius:16px;font-size:12px;">who saved the most</span>'
+            '<span style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25);color:#fc8181;padding:5px 12px;border-radius:16px;font-size:12px;">overdue</span>'
+            '<span style="background:rgba(234,179,8,.1);border:1px solid rgba(234,179,8,.25);color:#f6e05e;padding:5px 12px;border-radius:16px;font-size:12px;">Water</span>'
+            '<span style="background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.25);color:#63b3ed;padding:5px 12px;border-radius:16px;font-size:12px;">negative savings</span>'
+            '</div>')
+        st.markdown(chip_html, unsafe_allow_html=True)
 
-    q = st.text_input("Search", placeholder="Ask anything — e.g. 'how much did we spend on Water', 'top vendors', 'who has most overdue'", label_visibility="collapsed", key="ask_q")
+        q = st.text_input("Search", placeholder="Ask anything — e.g. 'how much did we spend on Water', 'top vendors', 'who has most overdue'", label_visibility="collapsed", key="ask_q")
 
-    def bubble(title, body_html, color='#6c63ff'):
-        st.markdown(
-            '<div style="background:#13131a;border:1px solid rgba(255,255,255,.08);border-left:3px solid '
-            + color + ';border-radius:14px;padding:18px 22px;margin-top:12px;">'
-            + '<div style="font-size:11px;font-weight:700;color:' + color
-            + ';text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;">' + title + '</div>'
-            + body_html + '</div>', unsafe_allow_html=True)
+        def bubble(title, body_html, color='#6c63ff'):
+            st.markdown(
+                '<div style="background:#13131a;border:1px solid rgba(255,255,255,.08);border-left:3px solid '
+                + color + ';border-radius:14px;padding:18px 22px;margin-top:12px;">'
+                + '<div style="font-size:11px;font-weight:700;color:' + color
+                + ';text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;">' + title + '</div>'
+                + body_html + '</div>', unsafe_allow_html=True)
 
-    def safe_table(dfx, maxh=320):
-        """Render any dataframe as clean strings so Arrow never crashes on mixed types."""
-        d = dfx.copy()
-        for c in d.columns:
-            if pd.api.types.is_datetime64_any_dtype(d[c]):
-                d[c] = d[c].dt.strftime('%d-%b-%Y')
-            else:
-                d[c] = d[c].astype(str).replace({'nan': '', 'None': '', 'NaT': ''})
-        st.dataframe(d, width='stretch', height=min(40 * len(d) + 50, maxh))
+        def safe_table(dfx, maxh=320):
+            """Render any dataframe as clean strings so Arrow never crashes on mixed types."""
+            d = dfx.copy()
+            for c in d.columns:
+                if pd.api.types.is_datetime64_any_dtype(d[c]):
+                    d[c] = d[c].dt.strftime('%d-%b-%Y')
+                else:
+                    d[c] = d[c].astype(str).replace({'nan': '', 'None': '', 'NaT': ''})
+            st.dataframe(d, use_container_width=True, height=min(40 * len(d) + 50, maxh))
 
-    def big_metrics(pairs):
-        cells = ''.join(
-            '<div style="flex:1;min-width:90px;"><div style="font-size:10px;color:#666;text-transform:uppercase;letter-spacing:.06em;">'
-            + l + '</div><div style="font-size:22px;font-weight:800;color:' + c
-            + ';font-family:DM Mono,monospace;line-height:1.3;">' + v + '</div></div>'
-            for l, v, c in pairs)
-        return '<div style="display:flex;gap:24px;flex-wrap:wrap;">' + cells + '</div>'
+        def big_metrics(pairs):
+            cells = ''.join(
+                '<div style="flex:1;min-width:90px;"><div style="font-size:10px;color:#666;text-transform:uppercase;letter-spacing:.06em;">'
+                + l + '</div><div style="font-size:22px;font-weight:800;color:' + c
+                + ';font-family:DM Mono,monospace;line-height:1.3;">' + v + '</div></div>'
+                for l, v, c in pairs)
+            return '<div style="display:flex;gap:24px;flex-wrap:wrap;">' + cells + '</div>'
 
-    def row_line(left, right, lcolor='#ddd', rcolor='#fff'):
-        return ('<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.05);">'
-                + '<span style="color:' + lcolor + ';font-size:13px;">' + left + '</span>'
-                + '<span style="color:' + rcolor + ';font-family:DM Mono,monospace;font-size:13px;">' + right + '</span></div>')
+        def row_line(left, right, lcolor='#ddd', rcolor='#fff'):
+            return ('<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.05);">'
+                    + '<span style="color:' + lcolor + ';font-size:13px;">' + left + '</span>'
+                    + '<span style="color:' + rcolor + ';font-family:DM Mono,monospace;font-size:13px;">' + right + '</span></div>')
 
-    if q and q.strip():
-        ql = q.strip().lower()
-        adf = df_pos.copy()
-        adf['_sp'] = pd.to_numeric(adf[C_PO_VAL], errors='coerce').fillna(0) if C_PO_VAL else 0
-        adf['_sv'] = pd.to_numeric(adf[C_SAV], errors='coerce').fillna(0) if C_SAV else 0
-        total_sp = adf['_sp'].sum()
-        answered = False
+        if q and q.strip():
+            ql = q.strip().lower()
+            adf = df_pos.copy()
+            adf['_sp'] = pd.to_numeric(adf[C_PO_VAL], errors='coerce').fillna(0) if C_PO_VAL else 0
+            adf['_sv'] = pd.to_numeric(adf[C_SAV], errors='coerce').fillna(0) if C_SAV else 0
+            total_sp = adf['_sp'].sum()
+            answered = False
 
-        if any(k in ql for k in ['top vendor', 'biggest vendor', 'largest vendor', 'which vendor', 'vendor']):
-            if C_SUPPLIER:
+            if any(k in ql for k in ['top vendor', 'biggest vendor', 'largest vendor', 'which vendor', 'vendor']):
+                if C_SUPPLIER:
+                    answered = True
+                    vg = adf[adf[C_SUPPLIER].astype(str).str.strip().ne('')].groupby(C_SUPPLIER)['_sp'].agg(['sum', 'count']).sort_values('sum', ascending=False).head(5)
+                    rows = ''
+                    for i, (name, r) in enumerate(vg.iterrows(), 1):
+                        share = r['sum'] / total_sp * 100
+                        rows += row_line(f'{i}. {str(name)[:38]}', f'Rs {r["sum"]/1e7:.2f}Cr · {share:.0f}% · {int(r["count"])} POs')
+                    top5share = vg['sum'].sum() / total_sp * 100
+                    bubble("Top 5 Vendors by Spend", rows + '<div style="margin-top:10px;font-size:12px;color:#888;">These 5 vendors account for <b style="color:#fc8181;">' + f'{top5share:.0f}' + '%</b> of total Cat-2 spend.</div>', '#6c63ff')
+
+            elif any(k in ql for k in ['saved the most', 'most saving', 'best saving', 'highest saving', 'who saved', 'top saving']):
                 answered = True
-                vg = adf[adf[C_SUPPLIER].astype(str).str.strip().ne('')].groupby(C_SUPPLIER)['_sp'].agg(['sum', 'count']).sort_values('sum', ascending=False).head(5)
+                grp_col = C_HANDLER if any(k in ql for k in ['buyer', 'who']) else C_BU
+                gg = adf.groupby(grp_col)['_sv'].sum().sort_values(ascending=False).head(5)
                 rows = ''
-                for i, (name, r) in enumerate(vg.iterrows(), 1):
-                    share = r['sum'] / total_sp * 100
-                    rows += row_line(f'{i}. {str(name)[:38]}', f'Rs {r["sum"]/1e7:.2f}Cr · {share:.0f}% · {int(r["count"])} POs')
-                top5share = vg['sum'].sum() / total_sp * 100
-                bubble("Top 5 Vendors by Spend", rows + '<div style="margin-top:10px;font-size:12px;color:#888;">These 5 vendors account for <b style="color:#fc8181;">' + f'{top5share:.0f}' + '%</b> of total Cat-2 spend.</div>', '#6c63ff')
+                for i, (name, val) in enumerate(gg.items(), 1):
+                    rows += row_line(f'{i}. {name}', f'Rs {val/1e7:.2f}Cr', rcolor='#68d391')
+                bubble(f"Top Savings by {'Buyer' if grp_col==C_HANDLER else 'BU'}", rows, '#22c55e')
 
-        elif any(k in ql for k in ['saved the most', 'most saving', 'best saving', 'highest saving', 'who saved', 'top saving']):
-            answered = True
-            grp_col = C_HANDLER if any(k in ql for k in ['buyer', 'who']) else C_BU
-            gg = adf.groupby(grp_col)['_sv'].sum().sort_values(ascending=False).head(5)
-            rows = ''
-            for i, (name, val) in enumerate(gg.items(), 1):
-                rows += row_line(f'{i}. {name}', f'Rs {val/1e7:.2f}Cr', rcolor='#68d391')
-            bubble(f"Top Savings by {'Buyer' if grp_col==C_HANDLER else 'BU'}", rows, '#22c55e')
+            elif any(k in ql for k in ['overdue', 'late deliver', 'delayed']):
+                answered = True
+                if C_MFC_DT and C_MFC_DAYS:
+                    m = adf.copy()
+                    m['_mfc'] = pd.to_datetime(m[C_MFC_DT], errors='coerce')
+                    m['_days'] = pd.to_numeric(m[C_MFC_DAYS].astype(str).str.replace(',', ''), errors='coerce')
+                    m = m.dropna(subset=['_mfc', '_days'])
+                    m = m[m['_days'] > 0]
+                    m['_exp'] = m['_mfc'] + pd.to_timedelta(m['_days'].astype(int), unit='D')
+                    m['_left'] = (m['_exp'] - pd.Timestamp(date.today())).dt.days
+                    od = m[m['_left'] <= 0]
+                    val = od['_sp'].sum() / 1e7
+                    worst = f'{int(abs(od["_left"].min()))}d' if len(od) else '—'
+                    bubble("Overdue Deliveries", big_metrics([('Overdue POs', str(len(od)), '#fc8181'), ('Value at Risk', f'Rs {val:.2f}Cr', '#fc8181'), ('Worst delay', worst, '#fc8181')]), '#e53e3e')
+                    if len(od):
+                        sc = [c for c in [C_BU, 'Project Name', C_ITEMS, C_SUPPLIER, C_HANDLER, C_PO_VAL] if c and c in od.columns]
+                        safe_table(od.sort_values('_left')[sc], 320)
+                else:
+                    bubble("Overdue", "MFC delivery data not available yet.", '#e53e3e')
 
-        elif any(k in ql for k in ['overdue', 'late deliver', 'delayed']):
-            answered = True
-            if C_MFC_DT and C_MFC_DAYS:
-                m = adf.copy()
-                m['_mfc'] = pd.to_datetime(m[C_MFC_DT], errors='coerce')
-                m['_days'] = pd.to_numeric(m[C_MFC_DAYS].astype(str).str.replace(',', ''), errors='coerce')
-                m = m.dropna(subset=['_mfc', '_days'])
-                m = m[m['_days'] > 0]
-                m['_exp'] = m['_mfc'] + pd.to_timedelta(m['_days'].astype(int), unit='D')
-                m['_left'] = (m['_exp'] - pd.Timestamp(date.today())).dt.days
-                od = m[m['_left'] <= 0]
-                val = od['_sp'].sum() / 1e7
-                worst = f'{int(abs(od["_left"].min()))}d' if len(od) else '—'
-                bubble("Overdue Deliveries", big_metrics([('Overdue POs', str(len(od)), '#fc8181'), ('Value at Risk', f'Rs {val:.2f}Cr', '#fc8181'), ('Worst delay', worst, '#fc8181')]), '#e53e3e')
-                if len(od):
-                    sc = [c for c in [C_BU, 'Project Name', C_ITEMS, C_SUPPLIER, C_HANDLER, C_PO_VAL] if c and c in od.columns]
-                    safe_table(od.sort_values('_left')[sc], 320)
-            else:
-                bubble("Overdue", "MFC delivery data not available yet.", '#e53e3e')
+            elif any(k in ql for k in ['negative saving', 'leakage', 'above baseline', 'over baseline', 'loss']):
+                answered = True
+                neg = adf[adf['_sv'] < 0]
+                val = abs(neg['_sv'].sum()) / 1e7
+                bubble("Negative Savings (paid above baseline)", big_metrics([('POs', str(len(neg)), '#fc8181'), ('Over baseline', f'Rs {val:.2f}Cr', '#fc8181')]), '#e53e3e')
+                if len(neg):
+                    sc = [c for c in [C_BU, 'Project Name', C_ITEMS, C_SUPPLIER, C_HANDLER, C_PO_VAL, C_SAV] if c and c in neg.columns]
+                    safe_table(neg[sc], 300)
 
-        elif any(k in ql for k in ['negative saving', 'leakage', 'above baseline', 'over baseline', 'loss']):
-            answered = True
-            neg = adf[adf['_sv'] < 0]
-            val = abs(neg['_sv'].sum()) / 1e7
-            bubble("Negative Savings (paid above baseline)", big_metrics([('POs', str(len(neg)), '#fc8181'), ('Over baseline', f'Rs {val:.2f}Cr', '#fc8181')]), '#e53e3e')
-            if len(neg):
-                sc = [c for c in [C_BU, 'Project Name', C_ITEMS, C_SUPPLIER, C_HANDLER, C_PO_VAL, C_SAV] if c and c in neg.columns]
-                safe_table(neg[sc], 300)
+            elif any(k in ql for k in ['how many po', 'total po', 'number of po', 'count']):
+                answered = True
+                bubble("PO Count", big_metrics([('Total POs Placed', str(len(adf)), '#63b3ed'), ('Total Spend', f'Rs {total_sp/1e7:.1f}Cr', '#fff'), ('Total Savings', f'Rs {adf["_sv"].sum()/1e7:.2f}Cr', '#68d391')]), '#3b82f6')
 
-        elif any(k in ql for k in ['how many po', 'total po', 'number of po', 'count']):
-            answered = True
-            bubble("PO Count", big_metrics([('Total POs Placed', str(len(adf)), '#63b3ed'), ('Total Spend', f'Rs {total_sp/1e7:.1f}Cr', '#fff'), ('Total Savings', f'Rs {adf["_sv"].sum()/1e7:.2f}Cr', '#68d391')]), '#3b82f6')
+            if not answered:
+                for col, lbl, clr in [(C_BU, 'BU', '#63b3ed'), (C_HANDLER, 'Buyer', '#a78bfa'), (C_SUPPLIER, 'Vendor', '#f6e05e'), (C_CAT, 'Category', '#68d391')]:
+                    if col and col in adf.columns:
+                        matches = [x for x in adf[col].dropna().unique() if ql in str(x).lower()]
+                        if matches:
+                            answered = True
+                            for mv in matches[:4]:
+                                g = adf[adf[col] == mv]
+                                sp = g['_sp'].sum() / 1e7
+                                sv = g['_sv'].sum() / 1e7
+                                pct = sv / sp * 100 if sp > 0 else 0
+                                share = g['_sp'].sum() / total_sp * 100 if total_sp > 0 else 0
+                                extra = ''
+                                if col == C_SUPPLIER:
+                                    np_ = g['Project Name'].nunique() if 'Project Name' in g.columns else 0
+                                    extra = '<div style="margin-top:8px;font-size:12px;color:#888;">Across ' + str(np_) + ' project(s) · ' + f'{share:.1f}' + '% of total Cat-2 spend</div>'
+                                bubble(f"{lbl}: {mv}",
+                                       big_metrics([('POs', str(len(g)), '#63b3ed'), ('Spend', f'Rs {sp:.2f}Cr', '#fff'), ('Savings', f'Rs {sv:.2f}Cr', '#68d391'), ('Rate', f'{pct:.1f}%', '#68d391' if pct >= 4.5 else '#f6e05e')]) + extra, clr)
+                                other = C_CAT if col == C_SUPPLIER else C_SUPPLIER
+                                sc = [c for c in [C_BU, 'Project Name', C_ITEMS, other, C_HANDLER, 'PO/OD Ref.', C_PO_VAL, C_CUR_ST] if c and c in g.columns]
+                                safe_table(g[sc], 300)
+                            break
 
-        if not answered:
-            for col, lbl, clr in [(C_BU, 'BU', '#63b3ed'), (C_HANDLER, 'Buyer', '#a78bfa'), (C_SUPPLIER, 'Vendor', '#f6e05e'), (C_CAT, 'Category', '#68d391')]:
-                if col and col in adf.columns:
-                    matches = [x for x in adf[col].dropna().unique() if ql in str(x).lower()]
-                    if matches:
-                        answered = True
-                        for mv in matches[:4]:
-                            g = adf[adf[col] == mv]
-                            sp = g['_sp'].sum() / 1e7
-                            sv = g['_sv'].sum() / 1e7
-                            pct = sv / sp * 100 if sp > 0 else 0
-                            share = g['_sp'].sum() / total_sp * 100 if total_sp > 0 else 0
-                            extra = ''
-                            if col == C_SUPPLIER:
-                                np_ = g['Project Name'].nunique() if 'Project Name' in g.columns else 0
-                                extra = '<div style="margin-top:8px;font-size:12px;color:#888;">Across ' + str(np_) + ' project(s) · ' + f'{share:.1f}' + '% of total Cat-2 spend</div>'
-                            bubble(f"{lbl}: {mv}",
-                                   big_metrics([('POs', str(len(g)), '#63b3ed'), ('Spend', f'Rs {sp:.2f}Cr', '#fff'), ('Savings', f'Rs {sv:.2f}Cr', '#68d391'), ('Rate', f'{pct:.1f}%', '#68d391' if pct >= 4.5 else '#f6e05e')]) + extra, clr)
-                            other = C_CAT if col == C_SUPPLIER else C_SUPPLIER
-                            sc = [c for c in [C_BU, 'Project Name', C_ITEMS, other, C_HANDLER, 'PO/OD Ref.', C_PO_VAL, C_CUR_ST] if c and c in g.columns]
-                            safe_table(g[sc], 300)
-                        break
+            if not answered:
+                st.markdown('<div class="info-box">I could not match that. Try a BU (Water, E&R), a buyer or vendor name, a category, or questions like <b>top vendors</b>, <b>who saved the most</b>, <b>overdue</b>, <b>negative savings</b>.</div>', unsafe_allow_html=True)
 
-        if not answered:
-            st.markdown('<div class="info-box">I could not match that. Try a BU (Water, E&R), a buyer or vendor name, a category, or questions like <b>top vendors</b>, <b>who saved the most</b>, <b>overdue</b>, <b>negative savings</b>.</div>', unsafe_allow_html=True)
-
+    except Exception as _e:
+        st.error("This tab hit an error: " + str(_e))
 # Footer
 st.markdown(f'<div style="padding:12px 0;border-top:1px solid rgba(255,255,255,.04);margin-top:16px;display:flex;justify-content:space-between;"><div style="font-size:11px;color:#333;">Zetwerk CPT · CAT-2 · FY 2026-27</div><div style="font-size:10px;color:#222;font-family:DM Mono,monospace;">{ts} · TTL 60s</div></div>', unsafe_allow_html=True)
 
